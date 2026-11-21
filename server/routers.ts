@@ -120,7 +120,7 @@ export const appRouter = router({
     }),
     updateRole: adminProcedure.input(z.object({
       userId: z.number().int().positive(),
-      role: z.enum(["admin", "cashier", "lab", "supervisor", "accountant"]),
+      role: z.enum(["admin", "cashier", "lab", "supervisor"]),
     })).mutation(async ({ input, ctx }) => {
       if (!canAdminUpdateRole(ctx.user.id, input.userId, input.role)) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن للمدير خفض صلاحية حسابه الحالي" });
@@ -154,13 +154,13 @@ export const appRouter = router({
   }),
 
   patients: router({
-    list: roleProcedure("cashier", "lab", "supervisor", "accountant").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
+    list: roleProcedure("cashier", "lab", "supervisor").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       const search = input?.search;
       return db.select().from(patients).where(search ? like(patients.name, `%${search}%`) : undefined).orderBy(desc(patients.createdAt)).limit(100);
     }),
-    workspace: roleProcedure("cashier", "lab", "supervisor", "accountant").query(async () => {
+    workspace: roleProcedure("cashier", "lab", "supervisor").query(async () => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const patientRows = await db.select().from(patients).orderBy(desc(patients.createdAt)).limit(100);
@@ -528,7 +528,7 @@ export const appRouter = router({
   }),
 
   reports: router({
-    summary: roleProcedure("admin", "supervisor", "accountant").input(z.object({ period: z.enum(["daily", "monthly"]), date: clinicDate })).query(async ({ input }) => {
+    summary: roleProcedure("admin", "supervisor").input(z.object({ period: z.enum(["daily", "monthly"]), date: clinicDate })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const window = getReportWindow(input.period, input.date);
@@ -539,7 +539,7 @@ export const appRouter = router({
       const refundRows = rows.filter(row => row.status === "refunded");
       return { period: input.period, date: input.date, issuedCount: rows.filter(row => row.status !== "cancelled").length, paidCount: paidRows.length, cancelledCount: rows.filter(row => row.status === "cancelled").length, refundedCount: refundRows.length, grossTotal: paidRows.reduce((sum, row) => sum + row.total, 0), refundTotal: refundRows.reduce((sum, row) => sum + row.total, 0), netTotal: paidRows.reduce((sum, row) => sum + row.total, 0) - refundRows.reduce((sum, row) => sum + row.total, 0), rows };
     }),
-    shift: roleProcedure("admin", "supervisor", "cashier", "accountant").input(z.object({ shiftDate: clinicDate, shiftType: z.enum(["morning", "evening", "night"]) })).query(async ({ input, ctx }) => {
+    shift: roleProcedure("admin", "supervisor", "cashier").input(z.object({ shiftDate: clinicDate, shiftType: z.enum(["morning", "evening", "night"]) })).query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const [shift] = await db.select().from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
