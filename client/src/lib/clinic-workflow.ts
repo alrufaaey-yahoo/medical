@@ -10,6 +10,15 @@ export type PatientIdentity = {
   invoice: string;
 };
 
+export type FollowUpPatient = {
+  tests: string[];
+  invoice: string;
+  invoiceTests?: string[];
+  consultationIncluded?: boolean;
+  paid: boolean;
+  status: "في الانتظار" | "في المختبر" | "مكتملة";
+};
+
 const arabicDateFormatter = new Intl.DateTimeFormat("ar-SD", {
   day: "numeric",
   month: "long",
@@ -71,5 +80,24 @@ export function getNextPatientIdentity(patients: NumberedPatient[]): PatientIden
   return {
     id: `P-${String(patientNumber).padStart(4, "0")}`,
     invoice: `INV-${String(invoiceNumber).padStart(6, "0")}`,
+  };
+}
+
+export function createFollowUpInvoice<T extends FollowUpPatient>(
+  patient: T,
+  requestedTests: string[],
+  invoice: string,
+): T | null {
+  const newTests = [...new Set(requestedTests)].filter((code) => !patient.tests.includes(code));
+  if (newTests.length === 0) return null;
+
+  return {
+    ...patient,
+    tests: [...patient.tests, ...newTests],
+    invoice,
+    invoiceTests: newTests,
+    consultationIncluded: false,
+    paid: false,
+    status: "في الانتظار",
   };
 }

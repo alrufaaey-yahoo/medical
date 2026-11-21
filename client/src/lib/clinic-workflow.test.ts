@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createFollowUpInvoice,
   formatClinicDateFromKey,
   getClinicDateKey,
   getCurrentClinicShift,
@@ -43,5 +44,37 @@ describe("clinic shift and registration identifiers", () => {
         { id: "P-0012", invoice: "INV-000077" },
       ]),
     ).toEqual({ id: "P-0013", invoice: "INV-000078" });
+  });
+
+  it("adds follow-up tests to the same patient and leaves only those tests on a new unpaid invoice", () => {
+    const patient = {
+      id: "P-1042",
+      tests: ["CBC"],
+      invoice: "INV-260021",
+      invoiceTests: ["CBC"],
+      consultationIncluded: true,
+      paid: true,
+      status: "في المختبر" as const,
+    };
+
+    expect(createFollowUpInvoice(patient, ["BFFM", "BFFM", "CBC"], "INV-260022")).toEqual({
+      ...patient,
+      tests: ["CBC", "BFFM"],
+      invoice: "INV-260022",
+      invoiceTests: ["BFFM"],
+      consultationIncluded: false,
+      paid: false,
+      status: "في الانتظار",
+    });
+  });
+
+  it("does not create a follow-up invoice when every requested test is already present", () => {
+    const patient = {
+      tests: ["CBC"],
+      invoice: "INV-260021",
+      paid: true,
+      status: "في المختبر" as const,
+    };
+    expect(createFollowUpInvoice(patient, ["CBC", "CBC"], "INV-260022")).toBeNull();
   });
 });
