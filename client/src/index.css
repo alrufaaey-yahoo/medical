@@ -317,10 +317,16 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .multi-result-page .a4-footer { position: absolute; right: 0; bottom: 0; left: 0; }
 @media print {
   .multi-result-print { width: auto; }
-  .multi-result-page { min-height: 0; padding-bottom: 24mm; }
-  .multi-result-page .a4-footer { position: fixed; bottom: 0; }
+  .multi-result-page { min-height: 265mm; padding-bottom: 0; box-sizing: border-box; break-inside: avoid; page-break-inside: avoid; }
 }
 @media print {
-  .multi-result-page { display: flex; flex-direction: column; min-height: 270mm; }
+  .multi-result-page { display: flex; flex-direction: column; min-height: 265mm; }
   .multi-result-page .a4-footer { position: static !important; margin-top: auto; }
+  .multi-result-page .patient-print-grid { gap: 10px; margin: 16px 0; padding: 11px; }
+  .multi-result-page .result-print-title { margin: 16px 0 10px; }
+  .multi-result-page .result-print-table th { padding: 7px 8px; }
+  .multi-result-page .result-print-table td { padding: 7px 8px; }
+  .multi-result-page .remarks-print { min-height: 44px; margin-top: 13px; padding: 9px; }
+  .multi-result-page .remarks-print p { margin-top: 5px; }
+  .multi-result-page .signature-row { margin-top: 18px; }
 }
