@@ -531,7 +531,8 @@ function Lab({ patients, selectedPatientId, setSelectedPatientId, selectedTestCo
 }
 
 function ResultField({ field, gender, value, onChange }: { field: TestField; gender: Patient["gender"]; value: string; onChange: (value: string) => void }) {
-  return <label className="form-field"><span>{field.label}{field.unit && <em>{field.unit}</em>}</span><div className="result-input-wrap"><input type={field.type === "number" ? "number" : "text"} value={value} onChange={(event) => onChange(event.target.value)} placeholder="—" /><span className="range-chip">{gender === "ذكر" ? field.male : field.female}</span></div></label>;
+  const selectOptions = field.male.includes("Negative") ? ["Negative", "Positive"] : ["سالب", "موجب"];
+  return <label className="form-field"><span>{field.label}{field.unit && <em>{field.unit}</em>}</span><div className="result-input-wrap">{field.type === "select" ? <select value={value} onChange={(event) => onChange(event.target.value)}><option value="">اختر النتيجة</option>{selectOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input type={field.type === "number" ? "number" : "text"} value={value} onChange={(event) => onChange(event.target.value)} placeholder="—" />}<span className="range-chip">{gender === "ذكر" ? field.male : field.female}</span></div></label>;
 }
 
 function TestsCatalog({ onToast, prices }: { onToast: (message: string) => void; prices: Record<string, number> }) {
