@@ -40,7 +40,7 @@ function tableEntry(row: ReportInvoiceRow, collected: boolean): TableEntry {
       ? "مدفوعة"
       : row.status === "pending"
         ? "بانتظار التحصيل"
-        : "ملغاة";
+        : row.status === "refunded" ? "مسترجعة" : "ملغاة";
   return {
     invoice: safeText(row.invoiceNumber, 40),
     patient: safeText(row.patientNumber, 32),
@@ -88,9 +88,11 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
     { label: "قيمة الفواتير", value: formatMoney(report.issuedTotal) },
     { label: "عدد التحصيلات", value: String(report.collectedCount) },
     { label: "إجمالي التحصيل", value: formatMoney(report.collectedTotal) },
+    { label: "الاسترجاعات", value: formatMoney(report.refundedTotal) },
+    { label: "الصافي", value: formatMoney(report.netTotal) },
   ];
   const cardGap = 8;
-  const cardWidth = (CONTENT_WIDTH - cardGap * 3) / 4;
+  const cardWidth = (CONTENT_WIDTH - cardGap * (summaryCards.length - 1)) / summaryCards.length;
   summaryCards.forEach((card, index) => {
     const x = LEFT + index * (cardWidth + cardGap);
     doc.roundedRect(x, y, cardWidth, 52, 5).fill("#f1f7f6");

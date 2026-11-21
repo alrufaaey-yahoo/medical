@@ -15,8 +15,9 @@ export type ReportInvoiceRow = {
   patientNumber: string;
   createdAt: Date;
   paidAt: Date | null;
+  refundedAt?: Date | null;
   total: number;
-  status: "pending" | "paid" | "cancelled";
+  status: "pending" | "paid" | "cancelled" | "refunded";
   paymentMethod: string | null;
 };
 
@@ -29,6 +30,8 @@ export type OperationalReport = ReportWindow & {
   pendingIssuedCount: number;
   collectedCount: number;
   collectedTotal: number;
+  refundedTotal: number;
+  netTotal: number;
 };
 
 export class InvalidReportRequestError extends Error {
@@ -113,8 +116,9 @@ export function buildOperationalReport(
   issuedRows: ReportInvoiceRow[],
   collectedRows: ReportInvoiceRow[],
 ): OperationalReport {
-  const issuedInvoices = issuedRows.filter(row => row.status !== "cancelled");
+  const issuedInvoices = issuedRows.filter(row => row.status !== "cancelled" && row.status !== "refunded");
   const collectedInvoices = collectedRows.filter(row => row.status === "paid" && row.paidAt !== null);
+  const refundedTotal = collectedRows.filter(row => row.status === "refunded" && row.refundedAt !== null).reduce((sum, row) => sum + row.total, 0);
   return {
     ...window,
     issuedInvoices,
@@ -125,6 +129,8 @@ export function buildOperationalReport(
     pendingIssuedCount: issuedInvoices.filter(row => row.status === "pending").length,
     collectedCount: collectedInvoices.length,
     collectedTotal: collectedInvoices.reduce((sum, row) => sum + row.total, 0),
+    refundedTotal,
+    netTotal: collectedInvoices.reduce((sum, row) => sum + row.total, 0) - refundedTotal,
   };
 }
 

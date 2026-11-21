@@ -6,7 +6,7 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin", "cashier", "lab", "supervisor"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "admin", "cashier", "lab", "supervisor", "accountant"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -36,6 +36,14 @@ export const shifts = mysqlTable("shifts", {
   openedAt: timestamp("openedAt").defaultNow().notNull(),
   closedAt: timestamp("closedAt"),
 }, (table) => [uniqueIndex("shifts_date_type_unique").on(table.shiftDate, table.shiftType)]);
+
+export const userShiftAssignments = mysqlTable("user_shift_assignments", {
+  id: int("id").autoincrement().primaryKey(),
+  shiftId: int("shiftId").notNull(),
+  userId: int("userId").notNull(),
+  assignedBy: int("assignedBy").notNull(),
+  assignedAt: timestamp("assignedAt").defaultNow().notNull(),
+}, (table) => [uniqueIndex("user_shift_assignments_unique").on(table.shiftId, table.userId)]);
 
 export const patients = mysqlTable("patients", {
   id: int("id").autoincrement().primaryKey(),
@@ -68,10 +76,13 @@ export const invoices = mysqlTable("invoices", {
   patientId: int("patientId").notNull(),
   shiftId: int("shiftId"),
   total: int("total").default(0).notNull(),
-  status: mysqlEnum("status", ["pending", "paid", "cancelled"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "paid", "cancelled", "refunded"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 40 }),
   createdBy: int("createdBy"),
   paidAt: timestamp("paidAt"),
+  refundedAt: timestamp("refundedAt"),
+  refundedBy: int("refundedBy"),
+  refundReason: varchar("refundReason", { length: 500 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -82,6 +93,19 @@ export const invoiceItems = mysqlTable("invoice_items", {
   description: varchar("description", { length: 180 }).notNull(),
   quantity: int("quantity").default(1).notNull(),
   unitPrice: int("unitPrice").default(0).notNull(),
+});
+
+export const invoiceAdjustments = mysqlTable("invoice_adjustments", {
+  id: int("id").autoincrement().primaryKey(),
+  invoiceId: int("invoiceId").notNull(),
+  type: mysqlEnum("type", ["add_test", "remove_test", "edit", "cancel", "refund"]).notNull(),
+  amountBefore: int("amountBefore").notNull(),
+  amountAfter: int("amountAfter").notNull(),
+  delta: int("delta").notNull(),
+  reason: varchar("reason", { length: 500 }).notNull(),
+  metadataJson: text("metadataJson"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const labOrders = mysqlTable("lab_orders", {
@@ -114,3 +138,4 @@ export type LabTest = typeof labTests.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type LabOrder = typeof labOrders.$inferSelect;
 export type LabResult = typeof labResults.$inferSelect;
+export type InvoiceAdjustment = typeof invoiceAdjustments.$inferSelect;

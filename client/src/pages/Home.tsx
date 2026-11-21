@@ -53,7 +53,7 @@ import {
 } from "@/lib/clinic-workflow";
 
 type Section = "overview" | "patients" | "billing" | "lab" | "tests" | "reports" | "users" | "settings";
-type Role = "supervisor" | "cashier" | "lab" | "admin";
+type Role = "supervisor" | "cashier" | "lab" | "admin" | "accountant";
 type Shift = "صباحية" | "مسائية" | "سهرة";
 type PrintMode = "invoice" | "result" | "report" | "patient-report" | null;
 type ReportRange = "today" | "month";
@@ -64,6 +64,7 @@ type Patient = {
   id: string;
   databaseId?: number;
   databaseInvoiceId?: number;
+  invoiceStatus?: "pending" | "paid" | "cancelled" | "refunded";
   invoiceTotal?: number;
   invoiceLines?: Array<{ description: string; unitPrice: number; code?: string }>;
   orderIds?: Record<string, number>;
@@ -150,6 +151,7 @@ const roleLabels: Record<Role, string> = {
   cashier: "كاشير / استقبال",
   lab: "فني المختبر",
   admin: "مدير النظام",
+  accountant: "المحاسب",
 };
 
 const roleDescriptions: Record<Role, string> = {
@@ -157,18 +159,21 @@ const roleDescriptions: Record<Role, string> = {
   cashier: "تسجيل المرضى والفواتير والتحصيل",
   lab: "إدخال النتائج وطباعة التقارير",
   admin: "المستخدمون والإعدادات والصلاحيات",
+  accountant: "الإيرادات اليومية والشهرية وتقارير الورديات",
 };
 const rolePermissions: Record<Role, string[]> = {
   supervisor: ["مشاهدة لوحة التشغيل", "عرض التقارير اليومية والشهرية", "مراجعة التسعير"],
   cashier: ["تسجيل المرضى", "إصدار الفواتير والتحصيل", "عرض وتنزيل التقارير اليومية والشهرية"],
   lab: ["مشاهدة طلبات المختبر", "إدخال النتائج", "طباعة تقارير المختبر"],
   admin: ["إدارة المستخدمين", "إدارة إعدادات المستوصف", "إدارة الصلاحيات والتسعير"],
+  accountant: ["الإيرادات اليومية والشهرية", "تقارير الورديات", "تنزيل التقارير المالية"],
 };
 const roleSections: Record<Role, Section[]> = {
   supervisor: ["overview", "patients", "billing", "lab", "tests", "reports"],
   cashier: ["overview", "patients", "billing", "reports"],
   lab: ["overview", "lab", "tests"],
   admin: ["overview", "patients", "billing", "lab", "tests", "reports", "users", "settings"],
+  accountant: ["overview", "billing", "reports"],
 };
 const sectionLabels: Record<Section, string> = {
   overview: "النظرة العامة",
@@ -529,7 +534,7 @@ function Patients({ patients, search, setSearch, onAddPatient, onSelectPatient, 
   return <div className="page-stack"><SectionTitle eyebrow={`السجلات · ${filtered.length} من ${patients.length} سجل`} title="المرضى والمراجعين" description="ابحث في سجلات المرضى، وراجع مسارهم والفواتير المرتبطة بهم." action={<button className="button button-primary" onClick={onAddPatient}><UserPlus size={16} />تسجيل مريض جديد</button>} /><div className="toolbar"><div className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث بالاسم أو رقم الملف أو الهاتف" />{search && <button type="button" className="search-clear" onClick={() => setSearch("")} aria-label="مسح بحث المرضى"><X size={14} /></button>}</div><div className="toolbar-filters"><button className={`filter-button ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>كل المرضى <span>{patients.length}</span></button><button className={`filter-button ${filter === "pending" ? "active" : ""}`} onClick={() => setFilter("pending")}>بانتظار الإجراء <span>{pendingCount}</span></button><button className={`filter-button ${filter === "lab" ? "active" : ""}`} onClick={() => setFilter("lab")}>في المختبر <span>{inLabCount}</span></button><button className={`filter-button ${filter === "completed" ? "active" : ""}`} onClick={() => setFilter("completed")}>مكتملة <span>{completedCount}</span></button></div></div><section className="panel"><div className="table-wrap"><table><thead><tr><th>المريض</th><th>النوع / العمر</th><th>الفحوصات</th><th>الدفع</th><th>الحالة</th><th>التسجيل</th><th /></tr></thead><tbody>{filtered.map((patient) => <tr key={patient.id} className="clickable-row" onClick={() => onSelectPatient(patient)}><td><div className="person-cell"><div className={`avatar ${patient.gender === "أنثى" ? "female" : ""}`}>{initials(patient.name)}</div><div><strong>{patient.name}</strong><span>{patient.id}{patient.sequence != null ? ` · #${String(patient.sequence).padStart(4, "0")}` : ""} · {patient.phone}</span></div></div></td><td><strong>{patient.gender}</strong><span className="muted-line">{patient.age == null ? "العمر غير محدد" : `${patient.age} سنة`}</span></td><td><div className="test-tags">{patient.tests.map((test) => <span key={test}>{test}</span>)}</div><span className="muted-line">{patient.tests.length} فحوصات</span></td><td><span className={`payment-label ${patient.paid ? "paid" : "unpaid"}`}>{patient.paid ? "مدفوعة" : "غير مكتملة"}</span></td><td><StatusPill status={patient.status} /></td><td className="muted-cell">{patient.registeredAt}</td><td><button className="row-menu" onClick={(event) => { event.stopPropagation(); onPrintInvoice(patient); }}><Printer size={16} /></button></td></tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><Search size={22} /><strong>{patients.length ? "لا توجد نتائج مطابقة" : "لا توجد سجلات محفوظة"}</strong><span>{patients.length ? "جرّب اسمًا أو رقم ملف مختلفًا أو غيّر الفلتر." : "أنشئ سجل مريض لبدء العمل."}</span></div>}</div></section></div>;
 }
 
-function Billing({ patients, onAddPatient, onPrintInvoice, onMarkPaid, saving }: { patients: Patient[]; onAddPatient: () => void; onPrintInvoice: (patient: Patient) => void; onMarkPaid: (patient: Patient) => void; saving?: boolean }) {
+function Billing({ patients, onAddPatient, onPrintInvoice, onMarkPaid, onCancel, onRefund, saving, canManage }: { patients: Patient[]; onAddPatient: () => void; onPrintInvoice: (patient: Patient) => void; onMarkPaid: (patient: Patient) => void; onCancel: (patient: Patient) => void; onRefund: (patient: Patient) => void; saving?: boolean; canManage: boolean }) {
   const [range, setRange] = useState<ReportRange>("today");
   const currentDate = getClinicDateKey();
   const visiblePatients = filterRecordsByReportRange(patients, range, currentDate);
@@ -539,7 +544,7 @@ function Billing({ patients, onAddPatient, onPrintInvoice, onMarkPaid, saving }:
   const paidCount = visiblePatients.filter((patient) => patient.paid).length;
   const pendingCount = visiblePatients.length - paidCount;
   const average = visiblePatients.length ? Math.round(total / visiblePatients.length) : 0;
-  return <div className="page-stack"><SectionTitle eyebrow="الاستقبال والتحصيل" title="الفواتير والتحصيل" description="كل زيارة لها فاتورتها؛ وتبقى فواتير الفحوصات اللاحقة مستقلة عن فاتورة المعاينة." action={<button className="button button-primary" onClick={onAddPatient}><Plus size={16} />فاتورة جديدة</button>} /><div className="billing-summary"><div><span>إجمالي الفواتير</span><strong>{formatCurrency(total)}</strong><small>{visiblePatients.length} فاتورة</small></div><div><span>تم التحصيل</span><strong className="teal-text">{formatCurrency(paidTotal)}</strong><small>{paidCount} فاتورة مكتملة</small></div><div><span>بانتظار التحصيل</span><strong className="amber-text">{formatCurrency(pendingTotal)}</strong><small>{pendingCount} فاتورة تحتاج متابعة</small></div><div><span>متوسط الفاتورة</span><strong>{formatCurrency(average)}</strong><small>للفواتير المعروضة</small></div></div><section className="panel"><div className="panel-header"><div><span className="eyebrow">آخر الفواتير · {range === "today" ? "اليوم" : "هذا الشهر"}</span><h2>حركة الاستقبال</h2></div><div className="table-actions"><button className={`filter-button ${range === "today" ? "active" : ""}`} onClick={() => setRange("today")}>اليوم</button><button className={`filter-button ${range === "month" ? "active" : ""}`} onClick={() => setRange("month")}>هذا الشهر</button></div></div><div className="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>المريض</th><th>الخدمات</th><th>الإجمالي</th><th>طريقة الدفع</th><th>الحالة</th><th /></tr></thead><tbody>{visiblePatients.map((patient) => { const invoiceTotal = getInvoiceTotal(patient); return <tr key={patient.invoice}><td><strong className="mono">{patient.invoice}</strong><span className="muted-line">{patient.registeredDate ? formatClinicDateFromKey(patient.registeredDate) : "—"} · {patient.registeredAt}</span></td><td><div className="person-cell"><div className="avatar small">{initials(patient.name)}</div><strong>{patient.name}</strong></div></td><td><div className="test-tags">{getInvoiceTests(patient).map((test) => <span key={test}>{test}</span>)}{patient.consultationIncluded && <span>معاينة</span>}</div></td><td><strong>{formatCurrency(invoiceTotal)}</strong></td><td><span className="cash-label"><WalletCards size={14} />{patient.paid ? "نقدي" : "—"}</span></td><td>{patient.paid ? <span className="payment-label paid">مكتملة</span> : <button className="button button-soft" disabled={saving} onClick={() => onMarkPaid(patient)}>{saving ? "جارٍ الحفظ..." : "تأكيد الدفع"}</button>}</td><td><button className="row-menu" onClick={() => onPrintInvoice(patient)} aria-label={`طباعة الفاتورة ${patient.invoice}`}><Printer size={16} /></button></td></tr>; })}</tbody></table>{visiblePatients.length === 0 && <div className="empty-state"><ReceiptText size={22} /><strong>لا توجد فواتير ضمن النطاق</strong><span>جرّب نطاقًا زمنيًا آخر أو أنشئ فاتورة جديدة.</span></div>}</div></section></div>;
+  return <div className="page-stack"><SectionTitle eyebrow="الاستقبال والتحصيل" title="الفواتير والتحصيل" description="كل زيارة لها فاتورتها؛ ويمكن للمدير والاستقبال توثيق الإلغاء والاسترجاع مع سبب وسجل مالي." action={<button className="button button-primary" onClick={onAddPatient}><Plus size={16} />فاتورة جديدة</button>} /><div className="billing-summary"><div><span>إجمالي الفواتير</span><strong>{formatCurrency(total)}</strong><small>{visiblePatients.length} فاتورة</small></div><div><span>تم التحصيل</span><strong className="teal-text">{formatCurrency(paidTotal)}</strong><small>{paidCount} فاتورة مكتملة</small></div><div><span>بانتظار التحصيل</span><strong className="amber-text">{formatCurrency(pendingTotal)}</strong><small>{pendingCount} فاتورة تحتاج متابعة</small></div><div><span>متوسط الفاتورة</span><strong>{formatCurrency(average)}</strong><small>للفواتير المعروضة</small></div></div><section className="panel"><div className="panel-header"><div><span className="eyebrow">آخر الفواتير · {range === "today" ? "اليوم" : "هذا الشهر"}</span><h2>حركة الاستقبال</h2></div><div className="table-actions"><button className={`filter-button ${range === "today" ? "active" : ""}`} onClick={() => setRange("today")}>اليوم</button><button className={`filter-button ${range === "month" ? "active" : ""}`} onClick={() => setRange("month")}>هذا الشهر</button></div></div><div className="table-wrap"><table><thead><tr><th>رقم الفاتورة</th><th>المريض</th><th>الخدمات</th><th>الإجمالي</th><th>طريقة الدفع</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{visiblePatients.map((patient) => { const invoiceTotal = getInvoiceTotal(patient); const cancelled = patient.invoiceStatus === "cancelled"; const refunded = patient.invoiceStatus === "refunded"; return <tr key={patient.invoice}><td><strong className="mono">{patient.invoice}</strong><span className="muted-line">{patient.registeredDate ? formatClinicDateFromKey(patient.registeredDate) : "—"} · {patient.registeredAt}</span></td><td><div className="person-cell"><div className="avatar small">{initials(patient.name)}</div><strong>{patient.name}</strong></div></td><td><div className="test-tags">{getInvoiceTests(patient).map((test) => <span key={test}>{test}</span>)}{patient.consultationIncluded && <span>معاينة</span>}</div></td><td><strong>{formatCurrency(invoiceTotal)}</strong></td><td><span className="cash-label"><WalletCards size={14} />{patient.paid ? "نقدي" : "—"}</span></td><td>{cancelled ? <span className="payment-label unpaid">ملغاة</span> : refunded ? <span className="payment-label unpaid">مسترجعة</span> : patient.paid ? <span className="payment-label paid">مكتملة</span> : <button className="button button-soft" disabled={saving} onClick={() => onMarkPaid(patient)}>{saving ? "جارٍ الحفظ..." : "تأكيد الدفع"}</button>}</td><td><div className="table-actions"><button className="row-menu" onClick={() => onPrintInvoice(patient)} aria-label={`طباعة الفاتورة ${patient.invoice}`}><Printer size={16} /></button>{canManage && !cancelled && !refunded && <>{patient.paid && <button className="button button-soft" onClick={() => onRefund(patient)}>استرجاع</button>}<button className="button button-soft" onClick={() => onCancel(patient)}>إلغاء</button></>}</div></td></tr>; })}</tbody></table>{visiblePatients.length === 0 && <div className="empty-state"><ReceiptText size={22} /><strong>لا توجد فواتير ضمن النطاق</strong><span>جرّب نطاقًا زمنيًا آخر أو أنشئ فاتورة جديدة.</span></div>}</div></section></div>;
 }
 function Lab({ patients, selectedPatientId, setSelectedPatientId, selectedTestCode, setSelectedTestCode, results, resultDraft, setResultDraft, onSaveResult, onPrintResult, savingResult }: { patients: Patient[]; selectedPatientId: string; setSelectedPatientId: (id: string) => void; selectedTestCode: string; setSelectedTestCode: (code: string) => void; results: Record<string, FieldValue>; resultDraft: FieldValue; setResultDraft: (draft: FieldValue) => void; onSaveResult: () => void; onPrintResult: () => void; savingResult?: boolean }) {
   const labPatients = patients.filter((patient) => patient.tests.length > 0);
@@ -685,7 +690,7 @@ function UsersManagement({ canManage, onToast }: { canManage: boolean; onToast: 
   const usersQuery = trpc.users.list.useQuery(undefined, { enabled: canManage, retry: false });
   const updateRoleMutation = trpc.users.updateRole.useMutation();
   const trpcUtils = trpc.useUtils();
-  const roleOptions: Role[] = ["admin", "supervisor", "cashier", "lab"];
+  const roleOptions: Role[] = ["admin", "supervisor", "cashier", "lab", "accountant"];
   const roleNames: Record<Role | "user", string> = { ...roleLabels, user: "غير معيّن" };
 
   const updateRole = (userId: number, role: Role) => {
@@ -793,7 +798,7 @@ export default function Home() {
 
   const authQuery = trpc.auth.me.useQuery(undefined, { retry: false });
   const sessionRole = authQuery.data?.role;
-  const hasOperationalRole = sessionRole != null && ["admin", "cashier", "lab", "supervisor"].includes(sessionRole);
+  const hasOperationalRole = sessionRole != null && ["admin", "cashier", "lab", "supervisor", "accountant"].includes(sessionRole);
   const canUseReception = !authQuery.data || sessionRole === "admin" || sessionRole === "cashier" || sessionRole === "supervisor";
   const canUseLaboratory = !authQuery.data || sessionRole === "admin" || sessionRole === "lab" || sessionRole === "supervisor";
   const canOpenShift = sessionRole === "admin" || sessionRole === "cashier" || sessionRole === "supervisor";
@@ -809,6 +814,8 @@ export default function Home() {
   const registerMutation = trpc.patients.register.useMutation();
   const followUpMutation = trpc.patients.addTests.useMutation();
   const paymentMutation = trpc.billing.markPaid.useMutation();
+  const cancelInvoiceMutation = trpc.billing.cancel.useMutation();
+  const refundInvoiceMutation = trpc.billing.refund.useMutation();
   const resultMutation = trpc.laboratory.saveResult.useMutation();
   const saveClinicSettingsMutation = trpc.clinic.saveSettings.useMutation();
   const openShiftMutation = trpc.shifts.open.useMutation();
@@ -849,6 +856,7 @@ export default function Home() {
         id: row.patientNumber,
         databaseId: row.id,
         databaseInvoiceId: latestInvoice?.id,
+        invoiceStatus: latestInvoice?.status,
         invoiceTotal: latestInvoice?.total ?? 0,
         orderIds,
         name: row.name,
@@ -892,6 +900,7 @@ export default function Home() {
       return [{
         ...patient,
         databaseInvoiceId: invoice.id,
+        invoiceStatus: invoice.status,
         invoiceTotal: invoice.total,
         invoice: invoice.invoiceNumber,
         paid,
@@ -1102,6 +1111,18 @@ export default function Home() {
       : current);
     setToast(`وضع تجريبي فقط؛ لم يُحفظ تحصيل الفاتورة ${patient.invoice} في قاعدة البيانات`);
   };
+  const handleCancelInvoice = (patient: Patient) => {
+    if (!patient.databaseInvoiceId || !window.confirm(`هل تريد إلغاء الفاتورة ${patient.invoice}؟`)) return;
+    const reason = window.prompt("سبب الإلغاء (إلزامي)", "طلب المريض")?.trim();
+    if (!reason) return;
+    cancelInvoiceMutation.mutate({ invoiceId: patient.databaseInvoiceId, reason }, { onSuccess: () => { void trpcUtils.patients.workspace.invalidate(); setToast(`تم إلغاء الفاتورة ${patient.invoice} وتسجيل السبب`); }, onError: error => setToast(`تعذر الإلغاء: ${error.message}`) });
+  };
+  const handleRefundInvoice = (patient: Patient) => {
+    if (!patient.databaseInvoiceId || !window.confirm(`هل تريد إرجاع ${formatCurrency(patient.invoiceTotal ?? 0)} للمريض؟`)) return;
+    const reason = window.prompt("سبب إرجاع المال (إلزامي)", "طلب المريض")?.trim();
+    if (!reason) return;
+    refundInvoiceMutation.mutate({ invoiceId: patient.databaseInvoiceId, reason }, { onSuccess: () => { void trpcUtils.patients.workspace.invalidate(); setToast(`تم توثيق استرجاع الفاتورة ${patient.invoice}`); }, onError: error => setToast(`تعذر الاسترجاع: ${error.message}`) });
+  };
   const handleNewPatient = (input: NewPatientInput) => {
     if (!canUseReception) {
       setToast("حسابك لا يملك صلاحية تسجيل المرضى");
@@ -1161,10 +1182,10 @@ export default function Home() {
     if (!accessibleSections.includes(activeSection)) return <AccessDenied role={effectiveRole} section={activeSection} />;
     if (activeSection === "overview") return <Overview patients={patients} shift={shift} shiftSequence={shiftSequences[shift]} onNavigate={setActiveSection} onAddPatient={() => setShowPatientDialog(true)} onPrintReport={() => triggerPrint("report")} />;
     if (activeSection === "patients") return <Patients patients={patients} search={search} setSearch={setSearch} onAddPatient={() => setShowPatientDialog(true)} onSelectPatient={setDrawerPatient} onPrintInvoice={(patient) => { setSelectedPatientId(patient.id); triggerPrint("invoice", patient); }} />;
-    if (activeSection === "billing") return <Billing patients={billingPatients} onAddPatient={() => setShowPatientDialog(true)} saving={paymentMutation.isPending} onMarkPaid={handleMarkPaid} onPrintInvoice={(patient) => { setSelectedPatientId(patient.id); triggerPrint("invoice", patient); }} />;
+    if (activeSection === "billing") return <Billing patients={billingPatients} onAddPatient={() => setShowPatientDialog(true)} saving={paymentMutation.isPending || cancelInvoiceMutation.isPending || refundInvoiceMutation.isPending} onMarkPaid={handleMarkPaid} onCancel={handleCancelInvoice} onRefund={handleRefundInvoice} canManage={sessionRole === "admin" || sessionRole === "cashier"} onPrintInvoice={(patient) => { setSelectedPatientId(patient.id); triggerPrint("invoice", patient); }} />;
     if (activeSection === "lab") return <Lab patients={patients} selectedPatientId={selectedPatientId} setSelectedPatientId={(id) => { setSelectedPatientId(id); setSelectedTestCode(patients.find((patient) => patient.id === id)?.tests[0] ?? "CBC"); setResultDraft(results[`${id}-${patients.find((patient) => patient.id === id)?.tests[0] ?? "CBC"}`] ?? {}); }} selectedTestCode={selectedTestCode} setSelectedTestCode={changeTest} results={results} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} savingResult={resultMutation.isPending} onPrintResult={() => triggerPrint("result")} />;
     if (activeSection === "tests") return <TestsCatalog onToast={setToast} prices={catalogPrices} canEdit={effectiveRole === "admin" || effectiveRole === "supervisor"} />;
-    if (activeSection === "reports") return <Reports patients={billingPatients} onPrintReport={(range) => triggerPrint("report", undefined, range)} onToast={setToast} canDownloadPdf={hasOperationalRole && (sessionRole === "admin" || sessionRole === "supervisor" || sessionRole === "cashier")} />;
+    if (activeSection === "reports") return <Reports patients={billingPatients} onPrintReport={(range) => triggerPrint("report", undefined, range)} onToast={setToast} canDownloadPdf={hasOperationalRole && (sessionRole === "admin" || sessionRole === "supervisor" || sessionRole === "cashier" || sessionRole === "accountant")} />;
     if (activeSection === "users") return <UsersManagement canManage={hasOperationalRole && effectiveRole === "admin"} onToast={setToast} />;
     return <Settings role={effectiveRole} setRole={setActiveRole} roleLocked={hasOperationalRole} shift={shift} setShift={setShift} clinicName={clinicQuery.data?.name ?? "مستوصف بكّا الطبي الحديث"} clinicLogoUrl={clinicQuery.data?.logoUrl ?? ""} clinicAddress={clinicQuery.data?.address ?? "الخرطوم بحري · السودان"} clinicPhone={clinicQuery.data?.phone ?? "011 234 5678 · 0912 440 218"} clinicEmail={clinicQuery.data?.email ?? "info@bakka-clinic.sd"} clinicWebsite={clinicQuery.data?.website ?? "www.bakka-clinic.sd"} clinicFooterText={clinicQuery.data?.footerText ?? "نتمنى لكم دوام الصحة والعافية. هذه النتيجة تعتمد على العينة والطريقة المعتمدة بالمختبر."} onSave={handleSaveClinicSettings} saving={saveClinicSettingsMutation.isPending} canSave={sessionRole === "admin" || sessionRole === "supervisor"} />;
   };

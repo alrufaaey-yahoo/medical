@@ -29,7 +29,7 @@ export class ReportDatabaseUnavailableError extends Error {
 }
 
 export function isReportRoleAllowed(role: string | null | undefined): boolean {
-  return role === "admin" || role === "supervisor" || role === "cashier";
+  return role === "admin" || role === "supervisor" || role === "cashier" || role === "accountant";
 }
 
 export async function createReportDownloadResponse(

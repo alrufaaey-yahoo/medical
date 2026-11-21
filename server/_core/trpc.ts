@@ -45,11 +45,11 @@ export const adminProcedure = t.procedure.use(
   }),
 );
 
-export const roleProcedure = (...roles: Array<'admin' | 'cashier' | 'lab' | 'supervisor'>) =>
+export const roleProcedure = (...roles: Array<'admin' | 'cashier' | 'lab' | 'supervisor' | 'accountant'>) =>
   protectedProcedure.use(
     t.middleware(async opts => {
       const user = opts.ctx.user;
-      const role = user?.role as 'admin' | 'cashier' | 'lab' | 'supervisor' | 'user' | undefined;
+      const role = user?.role as 'admin' | 'cashier' | 'lab' | 'supervisor' | 'accountant' | 'user' | undefined;
       if (!user || !hasRoleAccess(role, roles)) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'ليس لديك صلاحية لهذا الإجراء' });
       }

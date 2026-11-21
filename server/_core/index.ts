@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { and, desc, eq, gte, lt, ne } from "drizzle-orm";
+import { and, desc, eq, gte, lt, ne, or } from "drizzle-orm";
 import { clinicSettings, invoices, patients } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { buildOperationalReport } from "../operational-reports";
@@ -63,16 +63,16 @@ async function startServer() {
             patientNumber: patients.patientNumber,
             createdAt: invoices.createdAt,
             paidAt: invoices.paidAt,
+            refundedAt: invoices.refundedAt,
             total: invoices.total,
             status: invoices.status,
             paymentMethod: invoices.paymentMethod,
           })
             .from(invoices)
             .innerJoin(patients, eq(invoices.patientId, patients.id))
-            .where(and(
-              eq(invoices.status, "paid"),
-              gte(invoices.paidAt, window.start),
-              lt(invoices.paidAt, window.end),
+            .where(or(
+              and(eq(invoices.status, "paid"), gte(invoices.paidAt, window.start), lt(invoices.paidAt, window.end)),
+              and(eq(invoices.status, "refunded"), gte(invoices.refundedAt, window.start), lt(invoices.refundedAt, window.end)),
             ))
             .orderBy(desc(invoices.paidAt)),
           db.select({ name: clinicSettings.name, address: clinicSettings.address, phone: clinicSettings.phone, website: clinicSettings.website, footerText: clinicSettings.footerText }).from(clinicSettings).limit(1),
