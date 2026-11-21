@@ -62,6 +62,24 @@ const followUpInput = z.object({
   testCodes: z.array(z.string().trim().min(1).max(32)).min(1).max(50),
 });
 
+const labTestInput = z.object({
+  code: z.string().trim().min(2).max(32).regex(/^[A-Za-z0-9_-]+$/, "رمز الفحص يجب أن يكون بالإنجليزية والأرقام فقط"),
+  nameAr: z.string().trim().min(2).max(180),
+  nameEn: z.string().trim().max(180).optional(),
+  category: z.string().trim().max(100).optional(),
+  sample: z.string().trim().max(120).optional(),
+  price: z.number().int().min(0).max(100000000),
+  fieldsJson: z.string().max(30000).refine(value => {
+    try {
+      const fields = JSON.parse(value) as unknown;
+      return Array.isArray(fields) && fields.every(field => typeof field === "object" && field !== null);
+    } catch {
+      return false;
+    }
+  }, "حقول الفحص يجب أن تكون JSON صالحًا"),
+  active: z.number().int().min(0).max(1).default(1),
+});
+
 const CONSULTATION_FEE = 35000;
 
 export const appRouter = router({
@@ -400,6 +418,17 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) return [];
       return db.select().from(labTests).where(eq(labTests.active, 1)).orderBy(labTests.category, labTests.nameAr);
+    }),
+    save: roleProcedure("admin", "supervisor").input(labTestInput).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [existing] = await db.select({ id: labTests.id }).from(labTests).where(eq(labTests.code, input.code)).limit(1);
+      if (existing) {
+        await db.update(labTests).set(input).where(eq(labTests.id, existing.id));
+        return { id: existing.id, created: false } as const;
+      }
+      const result = await db.insert(labTests).values(input);
+      return { id: result[0].insertId, created: true } as const;
     }),
   }),
 });

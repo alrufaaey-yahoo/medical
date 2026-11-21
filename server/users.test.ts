@@ -63,4 +63,31 @@ describe("user administration API permissions", () => {
       labUserId: null,
     })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("denies cashier access to catalog mutations", async () => {
+    const caller = createCaller({ id: 9, role: "cashier" } as TestUser);
+
+    await expect(caller.catalog.save({
+      code: "TEST",
+      nameAr: "فحص تجريبي",
+      nameEn: "Test",
+      category: "عام",
+      sample: "دم",
+      price: 100,
+      fieldsJson: "[]",
+      active: 1,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects invalid catalog codes before database access", async () => {
+    const caller = createCaller({ id: 7, role: "supervisor" } as TestUser);
+
+    await expect(caller.catalog.save({
+      code: "CBC عربي",
+      nameAr: "صورة الدم",
+      price: 100,
+      fieldsJson: "[]",
+      active: 1,
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
 });
