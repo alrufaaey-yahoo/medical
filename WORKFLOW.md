@@ -8,9 +8,9 @@
 ## آخر نقطة توقف
 آخر commit مرفوع إلى `main` هو:
 
-`04d2cc7 feat: add admin user management screen`
+`eee883b test: protect current admin role`
 
-وقد أضاف شاشة إدارة مستخدمين عربية في `client/src/pages/Home.tsx` تظهر للمدير الرسمي فقط، وتستدعي `users.list` وتحديث الدور عبر `users.updateRole`. في وضع العرض التجريبي تظهر رسالة تتطلب جلسة مدير، ولا تُرسل طلبات API. إجراءات الخادم محمية بـ `adminProcedure`، وتمنع المدير من خفض صلاحية حسابه الحالي.
+وقد ثبّت سياسة `canAdminUpdateRole` في `server/_core/role-access.ts`، وربطها بإجراء `users.updateRole`، مع اختبار يمنع المدير من خفض صلاحية حسابه الحالي ويسمح بتحديث حسابات الآخرين. شاشة المستخدمين العربية في `client/src/pages/Home.tsx` تظهر للمدير الرسمي فقط، وتستدعي `users.list` وتحديث الدور عبر `users.updateRole`، بينما وضع العرض التجريبي لا يرسل طلبات API.
 
 في هذه الدفعة الحالية تم تنفيذ شاشة إدارة المستخدمين وربطها بإجراءات الخادم، ثم تحديث هذه الوثائق لتسجيل نقطة التوقف الجديدة.
 
@@ -49,6 +49,6 @@ pnpm build
 آخر تحقق مكتمل قبل تحديث هذه الوثائق:
 
 - `pnpm check`: ناجح.
-- `pnpm test`: 21 اختبارًا ناجحًا.
+- `pnpm test`: 22 اختبارًا ناجحًا.
 - `pnpm build`: ناجح مع تحذيري Vite غير حاجبين.
-- `main` متزامن مع `origin/main` عند commit `04d2cc7`.
+- `main` متزامن مع `origin/main` عند commit `eee883b`.
