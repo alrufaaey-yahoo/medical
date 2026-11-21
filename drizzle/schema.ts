@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -35,7 +35,7 @@ export const shifts = mysqlTable("shifts", {
   status: mysqlEnum("status", ["open", "closed"]).default("open").notNull(),
   openedAt: timestamp("openedAt").defaultNow().notNull(),
   closedAt: timestamp("closedAt"),
-});
+}, (table) => [uniqueIndex("shifts_date_type_unique").on(table.shiftDate, table.shiftType)]);
 
 export const patients = mysqlTable("patients", {
   id: int("id").autoincrement().primaryKey(),

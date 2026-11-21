@@ -15,6 +15,13 @@
       "when": 1795268531184,
       "tag": "0001_odd_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1795269906709,
+      "tag": "0002_shifts_unique_date_type",
+      "breakpoints": true
     }
   ]
 }
