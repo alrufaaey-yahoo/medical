@@ -90,4 +90,12 @@ describe("user administration API permissions", () => {
       active: 1,
     })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("denies cashier callers from closing a shift", async () => {
+    const caller = createCaller({ id: 9, role: "cashier" } as TestUser);
+
+    await expect(caller.shifts.close({ shiftDate: "2026-11-21", shiftType: "morning" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
 });

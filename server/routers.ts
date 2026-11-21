@@ -339,6 +339,23 @@ export const appRouter = router({
         .limit(1);
       return shift;
     }),
+    close: roleProcedure("admin", "supervisor").input(z.object({
+      shiftDate: clinicDate,
+      shiftType: z.enum(["morning", "evening", "night"]),
+    })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      return db.transaction(async tx => {
+        const [shift] = await tx.select().from(shifts)
+          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
+          .limit(1).for("update");
+        if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "الوردية غير موجودة" });
+        if (shift.status === "closed") return shift;
+        await tx.update(shifts).set({ status: "closed", closedAt: new Date() }).where(eq(shifts.id, shift.id));
+        const [closed] = await tx.select().from(shifts).where(eq(shifts.id, shift.id)).limit(1);
+        return closed;
+      });
+    }),
     current: protectedProcedure.input(z.object({ shiftDate: z.string(), shiftType: z.enum(["morning", "evening", "night"]) })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return null;
