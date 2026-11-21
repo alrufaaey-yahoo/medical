@@ -46,6 +46,7 @@ import {
   formatClinicDateFromKey,
   formatClinicTime,
   getClinicDateKey,
+  getClinicReportDateKey,
   getCurrentClinicShift,
   getNextPatientIdentity,
   isHttpsLogoUrl,
@@ -159,13 +160,13 @@ const roleDescriptions: Record<Role, string> = {
 };
 const rolePermissions: Record<Role, string[]> = {
   supervisor: ["مشاهدة لوحة التشغيل", "عرض التقارير اليومية والشهرية", "مراجعة التسعير"],
-  cashier: ["تسجيل المرضى", "إصدار الفواتير والتحصيل", "طباعة التذاكر"],
+  cashier: ["تسجيل المرضى", "إصدار الفواتير والتحصيل", "عرض وتنزيل التقارير اليومية والشهرية"],
   lab: ["مشاهدة طلبات المختبر", "إدخال النتائج", "طباعة تقارير المختبر"],
   admin: ["إدارة المستخدمين", "إدارة إعدادات المستوصف", "إدارة الصلاحيات والتسعير"],
 };
 const roleSections: Record<Role, Section[]> = {
   supervisor: ["overview", "patients", "billing", "lab", "reports"],
-  cashier: ["overview", "patients", "billing"],
+  cashier: ["overview", "patients", "billing", "reports"],
   lab: ["overview", "lab", "tests"],
   admin: ["overview", "patients", "billing", "lab", "tests", "reports", "users", "settings"],
 };
@@ -574,9 +575,44 @@ function TestsCatalog({ onToast, prices, canEdit }: { onToast: (message: string)
   return <div className="page-stack"><SectionTitle eyebrow="الإدارة · التسعير" title="كتالوج الفحوصات" description="أضف أي فحص جديد أو عدّل السعر والحقول والمديات المرجعية الخاصة بالذكر والأنثى." action={<div className="heading-actions"><span className={canEdit ? "catalog-access allowed" : "catalog-access readonly"}><ShieldCheck size={14} />{canEdit ? "صلاحية التسعير مفعلة" : "قراءة فقط"}</span><button className="button button-primary" disabled={!canEdit} title={canEdit ? "إضافة فحص جديد" : "يحتاج الدور إلى صلاحية التسعير"} onClick={() => onToast("تم فتح نموذج إضافة فحص جديد") }><Plus size={16} />إضافة فحص</button></div>} /><div className="catalog-toolbar"><div className="category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><div className="catalog-count"><TestTube2 size={16} />{visibleTests.length} فحوصات معروضة</div></div><div className="catalog-grid">{visibleTests.map((test) => <article className="test-card" key={test.code}><div className="test-card-top"><span className="test-code">{test.code}</span><button className="row-menu" disabled={!canEdit} title={canEdit ? "تعديل إعدادات الفحص" : "الكتالوج للقراءة فقط"}><MoreHorizontal size={16} /></button></div><h3>{test.name}</h3><p>{test.english}</p><div className="test-card-meta"><span><Beaker size={14} />{test.sample}</span><span><Clock3 size={14} />{test.turnaround}</span></div><div className="test-card-bottom"><strong>{formatCurrency(prices[test.code] ?? test.price)}</strong><span>{test.fields.length} حقول نتيجة</span></div></article>)}</div></div>;
 }
 
-function Reports({ patients, onPrintReport }: { patients: Patient[]; onPrintReport: (range: ReportRange) => void }) {
+function Reports({ patients, onPrintReport, onToast, canDownloadPdf }: { patients: Patient[]; onPrintReport: (range: ReportRange) => void; onToast: (message: string) => void; canDownloadPdf: boolean }) {
   const [range, setRange] = useState<ReportRange>("today");
-  const currentDate = getClinicDateKey();
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const currentDate = getClinicReportDateKey();
+  const handleDownloadPdf = async () => {
+    if (!canDownloadPdf) {
+      onToast("يتطلب تنزيل التقرير جلسة تشغيل رسمية بصلاحية مدير أو مشرف أو كاشير.");
+      return;
+    }
+    setDownloadingPdf(true);
+    try {
+      const params = new URLSearchParams({ period: range === "today" ? "daily" : "monthly", date: currentDate });
+      const response = await fetch(`/api/reports/pdf?${params.toString()}`, { credentials: "same-origin" });
+      if (!response.ok) {
+        let message = "تعذر إنشاء التقرير";
+        try {
+          const payload = await response.json() as { error?: unknown };
+          if (typeof payload.error === "string") message = payload.error;
+        } catch {
+          // Keep the safe generic message if the server does not return JSON.
+        }
+        throw new Error(message);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `clinic-report-${range === "today" ? "daily" : "monthly"}-${currentDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      onToast("تم تنزيل تقرير PDF الكامل للفترة المحددة.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "تعذر تنزيل التقرير حاليًا");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
   const reportPatients = filterRecordsByReportRange(patients, range, currentDate);
   const paidPatients = reportPatients.filter((patient) => patient.paid);
   const testCounts = reportPatients.flatMap((patient) => patient.tests).reduce<Record<string, number>>((counts, code) => ({ ...counts, [code]: (counts[code] ?? 0) + 1 }), {});
@@ -591,7 +627,7 @@ function Reports({ patients, onPrintReport }: { patients: Patient[]; onPrintRepo
   const paidTotal = paidPatients.reduce((sum, patient) => sum + getInvoiceTotal(patient), 0);
   const statusClass = (index: number) => ["teal", "blue", "amber", "rose"][index] ?? "teal";
 
-  return <div className="page-stack"><SectionTitle eyebrow="تحليل التشغيل" title="التقارير والمتابعة" description="ملخصات مبنية على سجلات المرضى والفواتير الظاهرة في مساحة العمل الحالية." action={<div className="heading-actions"><div className="table-actions"><button className={`filter-button ${range === "today" ? "active" : ""}`} onClick={() => setRange("today")}>اليوم</button><button className={`filter-button ${range === "month" ? "active" : ""}`} onClick={() => setRange("month")}>هذا الشهر</button></div><button className="button button-secondary" onClick={() => onPrintReport(range)}><Printer size={16} />طباعة التقرير</button></div>} /><div className="report-layout"><section className="panel report-chart"><div className="panel-header"><div><span className="eyebrow">آخر السجلات</span><h2>إيرادات الفواتير المعروضة</h2></div><span className="catalog-count">{reportPatients.length} سجلات</span></div><div className="chart-area">{chartPatients.length ? <div className="bars report-bars">{chartPatients.map((patient) => { const revenue = getInvoiceTotal(patient); return <div className="bar-column" key={patient.id}><div className="bar-value">{Math.round(revenue / 1000)}k</div><div className="chart-bar" style={{ height: `${Math.max(8, (revenue / maxRevenue) * 100)}%` }} /><span>{patient.registeredAt}</span></div>; })}</div> : <div className="empty-state"><FileBarChart size={22} /><strong>لا توجد سجلات كافية</strong><span>ستظهر الإيرادات بعد تسجيل المرضى.</span></div>}</div></section><section className="panel report-breakdown"><div className="panel-header"><div><span className="eyebrow">توزيع الفحوصات</span><h2>الأكثر طلبًا</h2></div><Activity size={19} className="muted-icon" /></div><div className="breakdown-list">{breakdown.length ? breakdown.map(({ code, percentage }, index) => <div key={code}><div className="breakdown-label"><span className={`legend ${statusClass(index)}`} />{code} <strong>{percentage}%</strong></div><div className="progress"><i className={statusClass(index)} style={{ width: `${percentage}%` }} /></div></div>) : <div className="empty-state"><strong>لا توجد فحوصات</strong><span>ستظهر هنا نسب الفحوصات المطلوبة.</span></div>}</div><div className="report-total"><span>إجمالي الفحوصات</span><strong>{totalTests} <small>فحص</small></strong></div></section></div><section className="panel"><div className="panel-header"><div><span className="eyebrow">سجل التقرير الحالي</span><h2>حركة الفواتير</h2></div><div className="report-total-inline"><span>المحصّل</span><strong>{formatCurrency(paidTotal)}</strong></div></div><div className="report-rows">{reportRows.length ? reportRows.map((patient) => <div key={`${patient.id}-${patient.invoice}`}><div className="report-file"><div className="file-icon teal"><FileText size={17} /></div><span><strong>{patient.invoice}</strong><small>{patient.name} · {patient.tests.length} فحوصات · {patient.registeredAt}</small></span></div><span className={patient.paid ? "ready-label" : "draft-label"}>{patient.paid ? "مكتملة" : "بانتظار التحصيل"}</span><button className="row-menu" onClick={() => onPrintReport(range)} aria-label={`طباعة تقرير ${patient.invoice}`}><Printer size={16} /></button></div>) : <div className="empty-state"><FileText size={22} /><strong>لا توجد فواتير في التقرير</strong><span>سجّل مريضًا لبدء حركة التقرير.</span></div>}</div></section></div>;
+  return <div className="page-stack"><SectionTitle eyebrow="تحليل التشغيل" title="التقارير والمتابعة" description="المعاينة مختصرة؛ ملف PDF يضم كامل الفواتير والتحصيلات من قاعدة البيانات وفق توقيت Africa/Khartoum." action={<div className="heading-actions"><div className="table-actions"><button className={`filter-button ${range === "today" ? "active" : ""}`} onClick={() => setRange("today")}>اليوم</button><button className={`filter-button ${range === "month" ? "active" : ""}`} onClick={() => setRange("month")}>هذا الشهر</button></div><button className="button button-primary" disabled={!canDownloadPdf || downloadingPdf} title={canDownloadPdf ? "تنزيل التقرير الكامل من الخادم" : "يتطلب جلسة تشغيل رسمية"} onClick={() => void handleDownloadPdf()}><Download size={16} />{downloadingPdf ? "جارٍ تجهيز PDF..." : "تنزيل PDF"}</button><button className="button button-secondary" onClick={() => onPrintReport(range)}><Printer size={16} />طباعة التقرير</button></div>} /><div className="report-layout"><section className="panel report-chart"><div className="panel-header"><div><span className="eyebrow">آخر السجلات</span><h2>إيرادات الفواتير المعروضة</h2></div><span className="catalog-count">{reportPatients.length} سجلات</span></div><div className="chart-area">{chartPatients.length ? <div className="bars report-bars">{chartPatients.map((patient) => { const revenue = getInvoiceTotal(patient); return <div className="bar-column" key={patient.id}><div className="bar-value">{Math.round(revenue / 1000)}k</div><div className="chart-bar" style={{ height: `${Math.max(8, (revenue / maxRevenue) * 100)}%` }} /><span>{patient.registeredAt}</span></div>; })}</div> : <div className="empty-state"><FileBarChart size={22} /><strong>لا توجد سجلات كافية</strong><span>ستظهر الإيرادات بعد تسجيل المرضى.</span></div>}</div></section><section className="panel report-breakdown"><div className="panel-header"><div><span className="eyebrow">توزيع الفحوصات</span><h2>الأكثر طلبًا</h2></div><Activity size={19} className="muted-icon" /></div><div className="breakdown-list">{breakdown.length ? breakdown.map(({ code, percentage }, index) => <div key={code}><div className="breakdown-label"><span className={`legend ${statusClass(index)}`} />{code} <strong>{percentage}%</strong></div><div className="progress"><i className={statusClass(index)} style={{ width: `${percentage}%` }} /></div></div>) : <div className="empty-state"><strong>لا توجد فحوصات</strong><span>ستظهر هنا نسب الفحوصات المطلوبة.</span></div>}</div><div className="report-total"><span>إجمالي الفحوصات</span><strong>{totalTests} <small>فحص</small></strong></div></section></div><section className="panel"><div className="panel-header"><div><span className="eyebrow">سجل التقرير الحالي</span><h2>حركة الفواتير</h2></div><div className="report-total-inline"><span>المحصّل</span><strong>{formatCurrency(paidTotal)}</strong></div></div><div className="report-rows">{reportRows.length ? reportRows.map((patient) => <div key={`${patient.id}-${patient.invoice}`}><div className="report-file"><div className="file-icon teal"><FileText size={17} /></div><span><strong>{patient.invoice}</strong><small>{patient.name} · {patient.tests.length} فحوصات · {patient.registeredAt}</small></span></div><span className={patient.paid ? "ready-label" : "draft-label"}>{patient.paid ? "مكتملة" : "بانتظار التحصيل"}</span><button className="row-menu" onClick={() => onPrintReport(range)} aria-label={`طباعة تقرير ${patient.invoice}`}><Printer size={16} /></button></div>) : <div className="empty-state"><FileText size={22} /><strong>لا توجد فواتير في التقرير</strong><span>سجّل مريضًا لبدء حركة التقرير.</span></div>}</div></section></div>;
 }
 function AccessDenied({ role, section }: { role: Role; section: Section }) {
   return <div className="page-stack"><SectionTitle eyebrow="الوصول المقيّد" title="هذا القسم غير متاح لهذا الدور" description={`لا يملك دور ${roleLabels[role]} صلاحية فتح قسم ${sectionLabels[section]} حاليًا.`} /><div className="panel empty-state"><ShieldCheck size={24} /><strong>الصلاحية غير متوفرة</strong><span>اختر قسمًا من القائمة الجانبية المسموحة لدورك، أو بدّل الدور من شاشة الدخول.</span></div></div>;
@@ -1081,7 +1117,7 @@ export default function Home() {
     if (activeSection === "billing") return <Billing patients={billingPatients} onAddPatient={() => setShowPatientDialog(true)} saving={paymentMutation.isPending} onMarkPaid={handleMarkPaid} onPrintInvoice={(patient) => { setSelectedPatientId(patient.id); triggerPrint("invoice", patient); }} />;
     if (activeSection === "lab") return <Lab patients={patients} selectedPatientId={selectedPatientId} setSelectedPatientId={(id) => { setSelectedPatientId(id); setSelectedTestCode(patients.find((patient) => patient.id === id)?.tests[0] ?? "CBC"); setResultDraft(results[`${id}-${patients.find((patient) => patient.id === id)?.tests[0] ?? "CBC"}`] ?? {}); }} selectedTestCode={selectedTestCode} setSelectedTestCode={changeTest} results={results} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} savingResult={resultMutation.isPending} onPrintResult={() => triggerPrint("result")} />;
     if (activeSection === "tests") return <TestsCatalog onToast={setToast} prices={catalogPrices} canEdit={effectiveRole === "admin" || effectiveRole === "supervisor"} />;
-    if (activeSection === "reports") return <Reports patients={billingPatients} onPrintReport={(range) => triggerPrint("report", undefined, range)} />;
+    if (activeSection === "reports") return <Reports patients={billingPatients} onPrintReport={(range) => triggerPrint("report", undefined, range)} onToast={setToast} canDownloadPdf={hasOperationalRole && (sessionRole === "admin" || sessionRole === "supervisor" || sessionRole === "cashier")} />;
     if (activeSection === "users") return <UsersManagement canManage={hasOperationalRole && effectiveRole === "admin"} onToast={setToast} />;
     return <Settings role={effectiveRole} setRole={setActiveRole} roleLocked={hasOperationalRole} shift={shift} setShift={setShift} clinicName={clinicQuery.data?.name ?? "مستوصف بكّا الطبي الحديث"} clinicLogoUrl={clinicQuery.data?.logoUrl ?? ""} clinicAddress={clinicQuery.data?.address ?? "الخرطوم بحري · السودان"} clinicPhone={clinicQuery.data?.phone ?? "011 234 5678 · 0912 440 218"} clinicEmail={clinicQuery.data?.email ?? "info@bakka-clinic.sd"} clinicWebsite={clinicQuery.data?.website ?? "www.bakka-clinic.sd"} clinicFooterText={clinicQuery.data?.footerText ?? "نتمنى لكم دوام الصحة والعافية. هذه النتيجة تعتمد على العينة والطريقة المعتمدة بالمختبر."} onSave={handleSaveClinicSettings} saving={saveClinicSettingsMutation.isPending} canSave={sessionRole === "admin" || sessionRole === "supervisor"} />;
   };

@@ -25,6 +25,8 @@ export type DatedClinicRecord = {
   registeredDate?: string;
 };
 
+export const CLINIC_TIME_ZONE = "Africa/Khartoum";
+
 export function isHttpsLogoUrl(value: string): boolean {
   const normalized = value.trim();
   if (!normalized) return true;
@@ -70,6 +72,16 @@ export function getClinicDateKey(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+export function getClinicReportDateKey(date = new Date()): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: CLINIC_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 export function formatClinicTime(date = new Date()): string {

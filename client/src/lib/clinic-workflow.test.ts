@@ -4,6 +4,7 @@ import {
   filterRecordsByReportRange,
   formatClinicDateFromKey,
   getClinicDateKey,
+  getClinicReportDateKey,
   getCurrentClinicShift,
   getNextPatientIdentity,
   isHttpsLogoUrl,
@@ -24,6 +25,11 @@ describe("clinic shift and registration identifiers", () => {
     expect(getClinicDateKey(new Date(2027, 0, 1, 0, 1))).toBe("2027-01-01");
     expect(formatClinicDateFromKey("2026-11-21")).not.toBe("2026-11-21");
     expect(formatClinicDateFromKey("invalid-date")).toBe("invalid-date");
+  });
+
+  it("uses Africa/Khartoum when selecting the date for official reports", () => {
+    expect(getClinicReportDateKey(new Date("2026-11-21T22:30:00.000Z"))).toBe("2026-11-22");
+    expect(getClinicReportDateKey(new Date("2026-12-31T22:30:00.000Z"))).toBe("2027-01-01");
   });
 
   it("accepts HTTPS clinic logo links and allows clearing the optional link", () => {

@@ -2,10 +2,17 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { and, desc, eq, gte, lt, ne } from "drizzle-orm";
+import { clinicSettings, invoices, patients } from "../../drizzle/schema";
+import { getDb } from "../db";
+import { buildOperationalReport } from "../operational-reports";
+import { createReportDownloadResponse } from "../report-download";
+import { renderOperationalReportPdf } from "../report-pdf";
 import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
 
 async function startServer() {
@@ -17,6 +24,71 @@ async function startServer() {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());
+  });
+  app.get("/api/reports/pdf", async (req, res) => {
+    let user = null;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      user = null;
+    }
+    const result = await createReportDownloadResponse({
+      period: req.query.period,
+      date: req.query.date,
+      role: user?.role,
+    }, {
+      loadReport: async window => {
+        const db = await getDb();
+        if (!db) return null;
+        const [issuedRows, collectedRows, settingsRows] = await Promise.all([
+          db.select({
+            invoiceNumber: invoices.invoiceNumber,
+            patientNumber: patients.patientNumber,
+            createdAt: invoices.createdAt,
+            paidAt: invoices.paidAt,
+            total: invoices.total,
+            status: invoices.status,
+            paymentMethod: invoices.paymentMethod,
+          })
+            .from(invoices)
+            .innerJoin(patients, eq(invoices.patientId, patients.id))
+            .where(and(
+              ne(invoices.status, "cancelled"),
+              gte(invoices.createdAt, window.start),
+              lt(invoices.createdAt, window.end),
+            ))
+            .orderBy(desc(invoices.createdAt)),
+          db.select({
+            invoiceNumber: invoices.invoiceNumber,
+            patientNumber: patients.patientNumber,
+            createdAt: invoices.createdAt,
+            paidAt: invoices.paidAt,
+            total: invoices.total,
+            status: invoices.status,
+            paymentMethod: invoices.paymentMethod,
+          })
+            .from(invoices)
+            .innerJoin(patients, eq(invoices.patientId, patients.id))
+            .where(and(
+              eq(invoices.status, "paid"),
+              gte(invoices.paidAt, window.start),
+              lt(invoices.paidAt, window.end),
+            ))
+            .orderBy(desc(invoices.paidAt)),
+          db.select({ name: clinicSettings.name }).from(clinicSettings).limit(1),
+        ]);
+        return {
+          report: buildOperationalReport(window, issuedRows, collectedRows),
+          clinicName: settingsRows[0]?.name ?? "مستوصف بكّا الطبي الحديث",
+        };
+      },
+      renderPdf: renderOperationalReportPdf,
+    });
+    if (Buffer.isBuffer(result.body)) {
+      res.status(result.status).set(result.headers ?? {}).send(result.body);
+    } else {
+      res.status(result.status).json(result.body);
+    }
   });
   registerOAuthRoutes(app);
   // tRPC API
