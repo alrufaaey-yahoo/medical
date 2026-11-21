@@ -94,11 +94,26 @@ export const appRouter = router({
   }),
 
   patients: router({
-    list: protectedProcedure.input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
+    list: roleProcedure("cashier", "lab", "supervisor").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       const search = input?.search;
       return db.select().from(patients).where(search ? like(patients.name, `%${search}%`) : undefined).orderBy(desc(patients.createdAt)).limit(100);
+    }),
+    workspace: roleProcedure("cashier", "lab", "supervisor").query(async () => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const patientRows = await db.select().from(patients).orderBy(desc(patients.createdAt)).limit(100);
+      if (patientRows.length === 0) return { patients: [], invoices: [], invoiceItems: [], labOrders: [], labTests: [] };
+      const patientIds = patientRows.map(patient => patient.id);
+      const invoiceRows = await db.select().from(invoices).where(inArray(invoices.patientId, patientIds)).orderBy(desc(invoices.createdAt)).limit(500);
+      const invoiceIds = invoiceRows.map(invoice => invoice.id);
+      const [itemRows, orderRows, testRows] = await Promise.all([
+        invoiceIds.length ? db.select().from(invoiceItems).where(inArray(invoiceItems.invoiceId, invoiceIds)) : Promise.resolve([]),
+        db.select().from(labOrders).where(inArray(labOrders.patientId, patientIds)).orderBy(desc(labOrders.createdAt)).limit(500),
+        db.select().from(labTests).where(eq(labTests.active, 1)).orderBy(labTests.category, labTests.nameAr),
+      ]);
+      return { patients: patientRows, invoices: invoiceRows, invoiceItems: itemRows, labOrders: orderRows, labTests: testRows };
     }),
     register: roleProcedure("cashier", "supervisor").input(visitInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
