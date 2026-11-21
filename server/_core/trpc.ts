@@ -43,3 +43,15 @@ export const adminProcedure = t.procedure.use(
     });
   }),
 );
+
+export const roleProcedure = (...roles: Array<'admin' | 'cashier' | 'lab' | 'supervisor'>) =>
+  protectedProcedure.use(
+    t.middleware(async opts => {
+      const user = opts.ctx.user;
+      const role = user?.role as 'admin' | 'cashier' | 'lab' | 'supervisor' | 'user' | undefined;
+      if (!user || (role !== 'admin' && !roles.includes(role as 'cashier' | 'lab' | 'supervisor'))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'ليس لديك صلاحية لهذا الإجراء' });
+      }
+      return opts.next();
+    }),
+  );
