@@ -6,6 +6,7 @@ import {
   getClinicDateKey,
   getCurrentClinicShift,
   getNextPatientIdentity,
+  isHttpsLogoUrl,
 } from "./clinic-workflow";
 
 describe("clinic shift and registration identifiers", () => {
@@ -23,6 +24,15 @@ describe("clinic shift and registration identifiers", () => {
     expect(getClinicDateKey(new Date(2027, 0, 1, 0, 1))).toBe("2027-01-01");
     expect(formatClinicDateFromKey("2026-11-21")).not.toBe("2026-11-21");
     expect(formatClinicDateFromKey("invalid-date")).toBe("invalid-date");
+  });
+
+  it("accepts HTTPS clinic logo links and allows clearing the optional link", () => {
+    expect(isHttpsLogoUrl(" https://clinic.example/logo.png ")).toBe(true);
+    expect(isHttpsLogoUrl("")).toBe(true);
+    expect(isHttpsLogoUrl("   ")).toBe(true);
+    expect(isHttpsLogoUrl("http://clinic.example/logo.png")).toBe(false);
+    expect(isHttpsLogoUrl("/manus-storage/logo.png")).toBe(false);
+    expect(isHttpsLogoUrl("not a URL")).toBe(false);
   });
 
   it("filters report records by the local day and month while keeping undated demo records visible", () => {

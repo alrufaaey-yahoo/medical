@@ -30,7 +30,7 @@ const patientInput = z.object({
 
 const clinicInput = z.object({
   name: z.string().trim().min(2).max(180),
-  logoUrl: z.string().url().max(500).optional(),
+  logoUrl: z.string().url().max(500).refine(value => new URL(value).protocol === "https:", "رابط الشعار يجب أن يستخدم HTTPS").nullable().optional(),
   address: z.string().trim().max(255).optional(),
   phone: z.string().trim().max(120).optional(),
   email: z.string().email().max(180).optional(),

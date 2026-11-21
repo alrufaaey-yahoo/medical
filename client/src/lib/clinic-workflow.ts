@@ -25,6 +25,17 @@ export type DatedClinicRecord = {
   registeredDate?: string;
 };
 
+export function isHttpsLogoUrl(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return true;
+
+  try {
+    return new URL(normalized).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 const arabicDateFormatter = new Intl.DateTimeFormat("ar-SD", {
   day: "numeric",
   month: "long",
