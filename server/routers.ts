@@ -273,6 +273,54 @@ export const appRouter = router({
   }),
 
   shifts: router({
+    assignments: adminProcedure.input(z.object({ shiftDate: clinicDate })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [shiftRows, staffRows] = await Promise.all([
+        db.select().from(shifts).where(eq(shifts.shiftDate, input.shiftDate)).orderBy(shifts.id),
+        db.select({ id: users.id, name: users.name, email: users.email, role: users.role })
+          .from(users)
+          .where(inArray(users.role, ["cashier", "lab"])),
+      ]);
+      return { shifts: shiftRows, staff: staffRows };
+    }),
+    assignUsers: adminProcedure.input(z.object({
+      shiftDate: clinicDate,
+      shiftType: z.enum(["morning", "evening", "night"]),
+      cashierUserId: z.number().int().positive().nullable(),
+      labUserId: z.number().int().positive().nullable(),
+    })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const requestedIds = [input.cashierUserId, input.labUserId].filter((id): id is number => id !== null);
+      const selectedUsers = requestedIds.length
+        ? await db.select({ id: users.id, role: users.role }).from(users).where(inArray(users.id, requestedIds))
+        : [];
+      if (selectedUsers.length !== requestedIds.length) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "أحد الحسابات المختارة غير موجود" });
+      }
+      const cashier = input.cashierUserId === null ? undefined : selectedUsers.find(user => user.id === input.cashierUserId);
+      const lab = input.labUserId === null ? undefined : selectedUsers.find(user => user.id === input.labUserId);
+      if (cashier && cashier.role !== "cashier") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "يجب اختيار حساب كاشير لوردية الاستقبال" });
+      }
+      if (lab && lab.role !== "lab") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "يجب اختيار حساب مختبر لوردية المعمل" });
+      }
+      await db.insert(shifts).values({
+        shiftDate: input.shiftDate,
+        shiftType: input.shiftType,
+        cashierUserId: input.cashierUserId,
+        labUserId: input.labUserId,
+      }).onDuplicateKeyUpdate({ set: {
+        cashierUserId: input.cashierUserId,
+        labUserId: input.labUserId,
+      } });
+      const [shift] = await db.select().from(shifts)
+        .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
+        .limit(1);
+      return shift;
+    }),
     current: protectedProcedure.input(z.object({ shiftDate: z.string(), shiftType: z.enum(["morning", "evening", "night"]) })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return null;

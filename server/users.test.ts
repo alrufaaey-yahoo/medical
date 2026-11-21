@@ -44,4 +44,23 @@ describe("user administration API permissions", () => {
       caller.users.updateRole({ userId: 8, role: "user" as "cashier" }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("denies non-admin callers before loading shift assignments", async () => {
+    const caller = createCaller({ id: 2, role: "supervisor" } as TestUser);
+
+    await expect(caller.shifts.assignments({ shiftDate: "2026-11-21" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("validates positive staff ids for shift assignments", async () => {
+    const caller = createCaller({ id: 7, role: "admin" } as TestUser);
+
+    await expect(caller.shifts.assignUsers({
+      shiftDate: "2026-11-21",
+      shiftType: "morning",
+      cashierUserId: 0,
+      labUserId: null,
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
 });
