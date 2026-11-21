@@ -192,3 +192,13 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .report-summary-box div { display: grid; gap: 6px; }
 .report-summary-box strong { color: #176f6b; font-size: 11px; }
 @media (max-width: 520px) { .drawer-summary { grid-template-columns: 1fr; } }
+
+@media print {
+  @page { size: A4; margin: 14mm 14mm 17mm; }
+  .print-doc.a4-doc { position: relative; inset: auto; min-height: 0; padding: 0; overflow: visible; }
+  .a4-doc .a4-header, .a4-doc .result-print-title, .a4-doc .patient-print-grid, .a4-doc .report-print-cards, .a4-doc .remarks-print, .a4-doc .signature-row, .a4-doc .report-summary-box { break-inside: avoid; page-break-inside: avoid; }
+  .a4-doc .result-print-table { break-inside: auto; page-break-inside: auto; }
+  .a4-doc .result-print-table thead { display: table-header-group; }
+  .a4-doc .result-print-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .a4-doc .a4-footer { position: fixed; right: 0; bottom: 0; left: 0; }
+}
