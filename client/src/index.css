@@ -202,3 +202,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
   .a4-doc .result-print-table tr { break-inside: avoid; page-break-inside: avoid; }
   .a4-doc .a4-footer { position: fixed; right: 0; bottom: 0; left: 0; }
 }
+
+.catalog-access { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 9px; border-radius: 7px; font-size: 10px; font-weight: 700; }
+.catalog-access.allowed { color: #277973; background: #e8f7f4; }
+.catalog-access.readonly { color: #8b7a4e; background: #fff7e5; }
