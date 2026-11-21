@@ -16,7 +16,7 @@ export function Billing({ patients, catalog, prices, banks, onAddPatient, onAddI
   onPrintInvoice: (patient: Patient) => void;
   onEditInvoice: (patient: Patient) => void;
   banks: { id: number; name: string }[];
-  onMarkPaid: (patient: Patient, payment: { paymentMethod: "cash" | "bank"; paymentBank?: string; transactionNumber?: string }) => void;
+  onMarkPaid: (patient: Patient, payment: { paymentMethod: "cash" | "bank"; paymentBank?: string; transactionNumber?: string }, onSuccess: () => void) => void;
   onCancel: (patient: Patient) => void;
   onRefund: (patient: Patient) => void;
   saving?: boolean;
@@ -102,7 +102,7 @@ export function Billing({ patients, catalog, prices, banks, onAddPatient, onAddI
             <label className="form-field"><span>رقم العملية (4 أرقام)</span><input inputMode="numeric" autoComplete="off" maxLength={4} pattern="[0-9]{4}" value={transactionNumber} onChange={event => setTransactionNumber(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="0000" /></label>
           </>}
         </div>
-        <div className="modal-footer"><button className="button button-secondary" onClick={() => setPayingPatient(null)}>إلغاء</button><button className="button button-primary" disabled={saving || (paymentMethod === "bank" && (!paymentBank || !/^\d{4}$/.test(transactionNumber)))} onClick={() => onMarkPaid(payingPatient, paymentMethod === "bank" ? { paymentMethod, paymentBank, transactionNumber } : { paymentMethod })}>{saving ? "جارٍ الحفظ..." : "تأكيد التحصيل"}</button></div>
+        <div className="modal-footer"><button className="button button-secondary" onClick={() => setPayingPatient(null)}>إلغاء</button><button className="button button-primary" disabled={saving || (paymentMethod === "bank" && (!paymentBank || !/^\d{4}$/.test(transactionNumber)))} onClick={() => onMarkPaid(payingPatient, paymentMethod === "bank" ? { paymentMethod, paymentBank, transactionNumber } : { paymentMethod }, () => setPayingPatient(null))}>{saving ? "جارٍ الحفظ..." : "تأكيد التحصيل"}</button></div>
       </div></div>}
     </div>
   );

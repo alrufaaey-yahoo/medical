@@ -137,10 +137,11 @@ export default function Home() {
 
     const patients: Patient[] = data.patients.map(row => {
       const invoicesForPatient = data.invoices.filter(invoice => invoice.patientId === row.id);
-      const latest = invoicesForPatient[0];
+      const latest = invoicesForPatient.find(invoice => invoice.status !== "cancelled" && invoice.status !== "refunded") ?? invoicesForPatient[0];
       const items = latest ? data.invoiceItems.filter(item => item.invoiceId === latest.id) : [];
-      const orders = data.labOrders.filter(order => order.patientId === row.id);
-      const invoiceOrders = latest ? orders.filter(order => order.invoiceId === latest.id) : orders;
+      const activeInvoiceIds = new Set(invoicesForPatient.filter(invoice => invoice.status !== "cancelled" && invoice.status !== "refunded").map(invoice => invoice.id));
+      const orders = data.labOrders.filter(order => order.patientId === row.id && activeInvoiceIds.has(order.invoiceId));
+      const invoiceOrders = orders;
       const allCodes = [...new Set(orders.map(order => codeByTestId.get(order.labTestId)).filter((code): code is string => Boolean(code)))];
       const invoiceCodes = items.map(item => item.labTestId == null ? undefined : codeByTestId.get(item.labTestId)).filter((code): code is string => Boolean(code));
       const invoiceLines = items.map(item => ({ description: item.description, unitPrice: item.unitPrice, code: item.labTestId == null ? undefined : codeByTestId.get(item.labTestId) }));
@@ -374,7 +375,7 @@ export default function Home() {
     });
   };
 
-  const handleMarkPaid = (patient: Patient, payment: { paymentMethod: "cash" | "bank"; paymentBank?: string; transactionNumber?: string }) => {
+  const handleMarkPaid = (patient: Patient, payment: { paymentMethod: "cash" | "bank"; paymentBank?: string; transactionNumber?: string }, onSuccess: () => void) => {
     if (!patient.databaseInvoiceId) {
       setToast("لا توجد فاتورة محفوظة لهذا السجل");
       return;
@@ -384,6 +385,7 @@ export default function Home() {
         invalidateWorkspace();
         void trpcUtils.clinic.listPaymentBanks.invalidate();
         setToast(`تم تحصيل الفاتورة ${patient.invoice} وتفعيل طلباتها المخبرية`);
+        onSuccess();
       },
       onError: error => setToast(`لم يُسجل التحصيل: ${error.message}`),
     });
