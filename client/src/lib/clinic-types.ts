@@ -19,6 +19,9 @@ export type Patient = {
   databaseInvoiceId?: number;
   invoiceStatus?: "pending" | "paid" | "cancelled" | "refunded";
   invoiceTotal?: number;
+  paymentMethod?: string | null;
+  paymentBank?: string | null;
+  transactionNumber?: string | null;
   invoiceLines?: InvoiceLineView[];
   consultationType?: ConsultationType;
   consultationFee?: number;

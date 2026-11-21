@@ -307,3 +307,20 @@ button:disabled { cursor: not-allowed; opacity: .52; }
   .report-toolbar { flex-direction: column; align-items: stretch; }
   .wide-modal { width: 100%; }
 }
+
+.multi-result-print { width: 210mm; }
+.multi-result-page { position: relative; min-height: 270mm; padding-bottom: 24mm; break-after: page; page-break-after: always; }
+.multi-result-page:last-of-type { break-after: auto; page-break-after: auto; }
+.multi-result-page .result-print-table tr, .multi-result-page .patient-print-grid > div, .multi-result-page .signature-row { break-inside: avoid; page-break-inside: avoid; }
+.multi-result-page .result-print-table { width: 100%; border-collapse: collapse; }
+.multi-result-page .result-print-table thead { display: table-header-group; }
+.multi-result-page .a4-footer { position: absolute; right: 0; bottom: 0; left: 0; }
+@media print {
+  .multi-result-print { width: auto; }
+  .multi-result-page { min-height: 0; padding-bottom: 24mm; }
+  .multi-result-page .a4-footer { position: fixed; bottom: 0; }
+}
+@media print {
+  .multi-result-page { display: flex; flex-direction: column; min-height: 270mm; }
+  .multi-result-page .a4-footer { position: static !important; margin-top: auto; }
+}

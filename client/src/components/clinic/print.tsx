@@ -15,11 +15,12 @@ export type PrintClinicInfo = {
 
 const PERIOD_LABEL: Record<ReportRange, string> = { today: "اليوم", week: "هذا الأسبوع", month: "هذا الشهر" };
 
-export function PrintDocument({ mode, patient, selectedTest, result, reportPatients, reportRange, clinic, catalog, prices, onClose }: {
+export function PrintDocument({ mode, patient, selectedTest, result, results, reportPatients, reportRange, clinic, catalog, prices, onClose }: {
   mode: Exclude<PrintMode, null>;
   patient: Patient;
   selectedTest: LabTest;
   result: FieldValue;
+  results: Record<string, FieldValue>;
   reportPatients: Patient[];
   reportRange: ReportRange;
   clinic: PrintClinicInfo;
@@ -48,7 +49,7 @@ export function PrintDocument({ mode, patient, selectedTest, result, reportPatie
           {lines.map((line, index) => <div className="print-row" key={`${line.code ?? line.description}-${index}`}><span>{line.description}</span><span>{formatCurrency(line.unitPrice)}</span></div>)}
         </div>
         <div className="print-total"><span>الإجمالي</span><strong>{formatCurrency(getInvoiceTotal(patient, catalog, prices))}</strong></div>
-        <div className="print-center print-payment">{patient.paid ? "مدفوعة" : "غير مكتملة الدفع"}</div>
+        <div className="print-center print-payment">{patient.paid ? `مدفوعة · ${patient.paymentMethod === "bank" ? `بنكي · ${patient.paymentBank ?? ""} · رقم العملية ${patient.transactionNumber ?? "—"}` : "نقدي"}` : "غير مكتملة الدفع"}</div>
         <div className="print-footer">{clinic.footerText}<br />{clinic.website}</div>
         {closeButton}
       </div>
@@ -97,6 +98,20 @@ export function PrintDocument({ mode, patient, selectedTest, result, reportPatie
   }
 
   if (mode === "result") {
+    const testsForPatient = patient.tests.map(code => catalog.find(test => test.code === code)).filter((test): test is LabTest => Boolean(test));
+    if (testsForPatient.length > 1) return <div className="print-doc a4-doc multi-result-print">
+      {testsForPatient.map((test, index) => {
+        const values = results[`${patient.id}-${test.code}`] ?? {};
+        return <section className="multi-result-page" key={test.code}>
+          <div className="a4-header"><div className="print-brand"><img src={clinic.logoUrl} alt="" /><div><strong>{clinic.name}</strong><span>قسم المختبر · نتائج الفحوصات المخبرية</span></div></div><div className="report-meta"><strong>{test.code}</strong><span>رقم العينة: {formatSampleNumber(patient, test)}</span></div></div>
+          <div className="print-rule" />
+          <div className="patient-print-grid"><div><span>اسم المريض</span><strong>{patient.name}</strong></div><div><span>رقم الملف</span><strong>{patient.id}</strong></div><div><span>العمر / الجنس</span><strong>{patient.age == null ? "غير محدد" : `${patient.age} سنة`} · {patient.gender}</strong></div><div><span>التاريخ</span><strong>{formatClinicDateFromKey(patient.registeredDate ?? getClinicDateKey())}</strong></div><div><span>نوع العينة</span><strong>{test.sample}</strong></div><div><span>الطبيب المحوّل</span><strong>{consultationChip(patient) ?? "بدون معاينة"}</strong></div></div>
+          <div className="result-print-title"><span>{test.category} · {index + 1} من {testsForPatient.length}</span><h1>{test.name}</h1><p>{test.english}</p></div>
+          <table className="result-print-table"><thead><tr><th>الفحص</th><th>النتيجة</th><th>الوحدة</th><th>المدى المرجعي ({patient.gender})</th></tr></thead><tbody>{test.fields.map(field => <tr key={field.key}><td>{field.label}</td><td><strong>{values[field.key] || "—"}</strong></td><td>{field.unit || "—"}</td><td>{patient.gender === "ذكر" ? field.male : field.female}</td></tr>)}</tbody></table>
+          <div className="remarks-print"><strong>ملاحظات / Remarks</strong><p>{values.remarks || "لا توجد ملاحظات إضافية."}</p></div><div className="signature-row"><div><span>اسم فني المختبر</span><strong>{values.technician || "________________"}</strong></div><div><span>التوقيع والختم</span><strong>________________</strong></div></div>
+          <div className="a4-footer"><span>هذه النتيجة للاستخدام الطبي المعتمد فقط، وتُفسّر مع الحالة السريرية.</span><span>{clinic.footerText} · {clinic.name}</span></div>
+        </section>;
+      })}{closeButton}</div>;
     return (
       <div className="print-doc a4-doc">
         <div className="a4-header">

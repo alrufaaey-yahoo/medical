@@ -20,6 +20,9 @@ type ReportRow = {
   status: "pending" | "paid" | "cancelled" | "refunded";
   consultationType?: "none" | "general" | "specialist" | null;
   consultationFee?: number | null;
+  paymentMethod?: string | null;
+  paymentBank?: string | null;
+  transactionNumber?: string | null;
   createdAt: Date | string;
   paidAt?: Date | string | null;
 };
@@ -70,6 +73,9 @@ function buildDemoReport(patients: Patient[], range: ReportPeriod, catalog: LabT
     consultationFee: patient.consultationFee ?? 0,
     createdAt: new Date().toISOString(),
     paidAt: patient.paid ? new Date().toISOString() : null,
+    paymentMethod: patient.paymentMethod,
+    paymentBank: patient.paymentBank,
+    transactionNumber: patient.transactionNumber,
   });
   const consultationRows = issued.filter(patient => getConsultationType(patient) !== "none");
   const consultationTotal = consultationRows.reduce((sum, patient) => sum + (patient.consultationFee ?? 0), 0);
@@ -109,7 +115,7 @@ function ReportTable({ rows, emptyText }: { rows: ReportRow[]; emptyText: string
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الإجمالي</th><th>الحالة</th><th>الوقت</th></tr></thead>
+        <thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الإجمالي</th><th>الدفع / البنك</th><th>رقم العملية</th><th>الحالة</th><th>الوقت</th></tr></thead>
         <tbody>
           {rows.map(row => (
             <tr key={`${row.invoiceNumber}-${row.status}`}>
@@ -117,6 +123,8 @@ function ReportTable({ rows, emptyText }: { rows: ReportRow[]; emptyText: string
               <td>{row.patientNumber}</td>
               <td>{row.consultationType === "specialist" ? "معاينة اختصاصي" : row.consultationType === "general" ? "معاينة عمومي" : "فحوصات"}</td>
               <td><strong>{formatCurrency(row.total)}</strong></td>
+              <td>{row.paymentMethod === "bank" ? `بنكي · ${row.paymentBank ?? "—"}` : row.paymentMethod === "cash" ? "نقدي" : "—"}</td>
+              <td className="mono">{row.transactionNumber ?? "—"}</td>
               <td>{statusLabel(row.status)}</td>
               <td className="muted-cell">{toTime(row.paidAt ?? row.createdAt)}</td>
             </tr>

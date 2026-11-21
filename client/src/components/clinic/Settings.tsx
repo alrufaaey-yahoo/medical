@@ -1,4 +1,4 @@
-import { AlertCircle, BadgeCheck, CalendarDays, ChevronDown, ShieldCheck } from "lucide-react";
+import { AlertCircle, BadgeCheck, CalendarDays, ChevronDown, ShieldCheck, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { isHttpsLogoUrl } from "@/lib/clinic-workflow";
 import { roleDescriptions, roleLabels, rolePermissions, type Role, type Shift } from "@/lib/clinic-types";
@@ -14,7 +14,7 @@ export type ClinicSettingsDraft = {
   footerText: string;
 };
 
-export function Settings({ role, shift, setShift, settings, canSave, saving, onSave }: {
+export function Settings({ role, shift, setShift, settings, canSave, saving, onSave, banks, onAddBank, onRemoveBank }: {
   role: Role;
   shift: Shift;
   setShift: (shift: Shift) => void;
@@ -22,7 +22,11 @@ export function Settings({ role, shift, setShift, settings, canSave, saving, onS
   canSave: boolean;
   saving: boolean;
   onSave: (draft: ClinicSettingsDraft) => void;
+  banks: { id: number; name: string }[];
+  onAddBank: (name: string) => void;
+  onRemoveBank: (id: number) => void;
 }) {
+  const [bankName, setBankName] = useState("");
   const [draft, setDraft] = useState<ClinicSettingsDraft>({
     name: settings?.name ?? "مستوصف بكّا الطبي الحديث",
     logoUrl: settings?.logoUrl ?? "",
@@ -72,6 +76,12 @@ export function Settings({ role, shift, setShift, settings, canSave, saving, onS
               <div className="full-field logo-preview"><img src={logoUrlIsValid && draft.logoUrl.trim() ? draft.logoUrl.trim() : "/logo.svg"} alt="معاينة شعار المستوصف" onError={event => { event.currentTarget.src = "/logo.svg"; }} /><span>{logoUrlIsValid ? (draft.logoUrl.trim() ? "معاينة الشعار الذي سيظهر في قوالب الطباعة" : "سيُستخدم الشعار الافتراضي عند ترك الرابط فارغًا") : "الرابط غير صالح؛ لن يُحفظ الشعار حتى تصحيحه"}</span></div>
               <label className="form-field full-field"><span>رسالة أسفل التقرير</span><textarea rows={3} value={draft.footerText} disabled={!canSave} onChange={event => update("footerText", event.target.value)} /></label>
             </div>
+          </div>
+          <div className="settings-section border-top">
+            <div className="panel-header"><div><span className="eyebrow">التحصيل البنكي</span><h2>قائمة البنوك</h2></div><span className={role === "admin" ? "saved-badge" : "readonly-badge"}>{role === "admin" ? "إدارة المدير" : "قراءة فقط"}</span></div>
+            <p className="settings-readonly-note">تظهر هذه الأسماء عند تسجيل الدفع البنكي. البنوك الافتراضية: بنكك، أوكاش، فوري.</p>
+            {role === "admin" && <div className="heading-actions"><input aria-label="اسم بنك جديد" value={bankName} onChange={event => setBankName(event.target.value)} placeholder="اسم البنك" /><button className="button button-primary" disabled={bankName.trim().length < 2} onClick={() => { onAddBank(bankName.trim()); setBankName(""); }}><Plus size={15} />إضافة بنك</button></div>}
+            <div className="test-tags">{banks.map(bank => <span key={bank.id}>{bank.name}{role === "admin" && bank.id > 0 && <button aria-label={`حذف ${bank.name}`} title="تعطيل البنك" onClick={() => onRemoveBank(bank.id)}><X size={13} /></button>}</span>)}</div>
           </div>
           <div className="settings-section border-top">
             <div className="panel-header"><div><span className="eyebrow">الوردية الحالية</span><h2>توزيع التشغيل</h2></div><CalendarDays size={19} className="muted-icon" /></div>

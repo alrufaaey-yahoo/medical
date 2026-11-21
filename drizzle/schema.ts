@@ -85,11 +85,20 @@ export const invoices = mysqlTable("invoices", {
   consultationFee: int("consultationFee").default(0).notNull(),
   status: mysqlEnum("status", ["pending", "paid", "cancelled", "refunded"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 40 }),
+  paymentBank: varchar("paymentBank", { length: 120 }),
+  transactionNumber: varchar("transactionNumber", { length: 4 }),
   createdBy: int("createdBy"),
   paidAt: timestamp("paidAt"),
   refundedAt: timestamp("refundedAt"),
   refundedBy: int("refundedBy"),
   refundReason: varchar("refundReason", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const paymentBanks = mysqlTable("payment_banks", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull().unique(),
+  active: int("active").default(1).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

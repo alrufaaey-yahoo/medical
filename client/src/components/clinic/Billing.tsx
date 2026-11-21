@@ -7,7 +7,7 @@ import { consultationChip, formatCurrency, getInvoiceTests, getInvoiceTotal, ini
 import type { Patient, ReportRange } from "@/lib/clinic-types";
 import { SectionTitle } from "./ui";
 
-export function Billing({ patients, catalog, prices, onAddPatient, onAddInvoice, onPrintInvoice, onEditInvoice, onMarkPaid, onCancel, onRefund, saving, canManage }: {
+export function Billing({ patients, catalog, prices, banks, onAddPatient, onAddInvoice, onPrintInvoice, onEditInvoice, onMarkPaid, onCancel, onRefund, saving, canManage }: {
   patients: Patient[];
   catalog: LabTest[];
   prices: ConsultationPrices;
@@ -15,13 +15,18 @@ export function Billing({ patients, catalog, prices, onAddPatient, onAddInvoice,
   onAddInvoice: () => void;
   onPrintInvoice: (patient: Patient) => void;
   onEditInvoice: (patient: Patient) => void;
-  onMarkPaid: (patient: Patient) => void;
+  banks: { id: number; name: string }[];
+  onMarkPaid: (patient: Patient, payment: { paymentMethod: "cash" | "bank"; paymentBank?: string; transactionNumber?: string }) => void;
   onCancel: (patient: Patient) => void;
   onRefund: (patient: Patient) => void;
   saving?: boolean;
   canManage: boolean;
 }) {
   const [range, setRange] = useState<ReportRange>("today");
+  const [payingPatient, setPayingPatient] = useState<Patient | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank">("cash");
+  const [paymentBank, setPaymentBank] = useState("");
+  const [transactionNumber, setTransactionNumber] = useState("");
   const currentDate = getClinicDateKey();
   const visiblePatients = filterRecordsByReportRange(patients, range, currentDate);
   const total = visiblePatients.reduce((sum, patient) => sum + getInvoiceTotal(patient, catalog, prices), 0);
@@ -68,8 +73,8 @@ export function Billing({ patients, catalog, prices, onAddPatient, onAddInvoice,
                     <td><div className="person-cell"><div className="avatar small">{initials(patient.name)}</div><strong>{patient.name}</strong></div></td>
                     <td><div className="test-tags">{getInvoiceTests(patient).map(test => <span key={test}>{test}</span>)}{chip && <span>{chip}</span>}</div></td>
                     <td><strong>{formatCurrency(invoiceTotal)}</strong></td>
-                    <td><span className="cash-label"><WalletCards size={14} />{patient.paid ? "نقدي" : "—"}</span></td>
-                    <td>{cancelled ? <span className="payment-label unpaid">ملغاة</span> : refunded ? <span className="payment-label unpaid">مسترجعة</span> : patient.paid ? <span className="payment-label paid">مكتملة</span> : <button className="button button-soft" disabled={saving} onClick={() => onMarkPaid(patient)}>{saving ? "جارٍ الحفظ..." : "تأكيد الدفع"}</button>}</td>
+                    <td><span className="cash-label"><WalletCards size={14} />{patient.paid ? patient.paymentMethod === "bank" ? `بنكي · ${patient.paymentBank ?? ""} · ${patient.transactionNumber ?? ""}` : "نقدي" : "—"}</span></td>
+                    <td>{cancelled ? <span className="payment-label unpaid">ملغاة</span> : refunded ? <span className="payment-label unpaid">مسترجعة</span> : patient.paid ? <span className="payment-label paid">مكتملة</span> : <button className="button button-soft" disabled={saving} onClick={() => { setPayingPatient(patient); setPaymentMethod("cash"); setPaymentBank(""); setTransactionNumber(""); }}>{saving ? "جارٍ الحفظ..." : "تأكيد الدفع"}</button>}</td>
                     <td>
                       <div className="table-actions">
                         {canManage && !cancelled && !refunded && <button className="row-menu" title="تعديل الفاتورة" aria-label={`تعديل الفاتورة ${patient.invoice}`} onClick={() => onEditInvoice(patient)}><Pencil size={15} /></button>}
@@ -88,6 +93,17 @@ export function Billing({ patients, catalog, prices, onAddPatient, onAddInvoice,
           {visiblePatients.length === 0 && <div className="empty-state"><ReceiptText size={22} /><strong>لا توجد فواتير ضمن النطاق</strong><span>جرّب نطاقًا زمنيًا آخر أو أنشئ فاتورة جديدة.</span></div>}
         </div>
       </section>
+      {payingPatient && <div className="modal-backdrop" onMouseDown={() => setPayingPatient(null)}><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="payment-title" onMouseDown={event => event.stopPropagation()}>
+        <div className="modal-header"><div><span className="eyebrow">تحصيل الفاتورة {payingPatient.invoice}</span><h2 id="payment-title">تسجيل طريقة الدفع</h2></div></div>
+        <div className="modal-body form-grid">
+          <label className="form-field"><span>طريقة الدفع</span><select value={paymentMethod} onChange={event => setPaymentMethod(event.target.value as "cash" | "bank")}><option value="cash">نقدي</option><option value="bank">بنكي</option></select></label>
+          {paymentMethod === "bank" && <>
+            <label className="form-field"><span>البنك</span><select value={paymentBank} onChange={event => setPaymentBank(event.target.value)}><option value="">اختر البنك</option>{banks.map(bank => <option key={bank.id} value={bank.name}>{bank.name}</option>)}</select></label>
+            <label className="form-field"><span>رقم العملية (4 أرقام)</span><input inputMode="numeric" autoComplete="off" maxLength={4} pattern="[0-9]{4}" value={transactionNumber} onChange={event => setTransactionNumber(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="0000" /></label>
+          </>}
+        </div>
+        <div className="modal-footer"><button className="button button-secondary" onClick={() => setPayingPatient(null)}>إلغاء</button><button className="button button-primary" disabled={saving || (paymentMethod === "bank" && (!paymentBank || !/^\d{4}$/.test(transactionNumber)))} onClick={() => onMarkPaid(payingPatient, paymentMethod === "bank" ? { paymentMethod, paymentBank, transactionNumber } : { paymentMethod })}>{saving ? "جارٍ الحفظ..." : "تأكيد التحصيل"}</button></div>
+      </div></div>}
     </div>
   );
 }

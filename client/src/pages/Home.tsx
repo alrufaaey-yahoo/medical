@@ -89,7 +89,7 @@ export default function Home() {
   const [drawerPatient, setDrawerPatient] = useState<Patient | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedTestCode, setSelectedTestCode] = useState("");
-  const [resultDraft, setResultDraft] = useState<FieldValue>({});
+  const [resultDrafts, setResultDrafts] = useState<Record<string, FieldValue>>({});
   const [printMode, setPrintMode] = useState<PrintMode>(null);
   const [printPatientSnapshot, setPrintPatientSnapshot] = useState<Patient | null>(null);
   const [printReportRange, setPrintReportRange] = useState<ReportRange>("today");
@@ -107,6 +107,7 @@ export default function Home() {
   const catalogQuery = trpc.catalog.list.useQuery(undefined, { staleTime: 5 * 60 * 1000, retry: false });
   const pricingQuery = trpc.pricing.get.useQuery(undefined, { staleTime: 5 * 60 * 1000, retry: false });
   const clinicQuery = trpc.clinic.getSettings.useQuery(undefined, { staleTime: 5 * 60 * 1000, retry: false });
+  const paymentBanksQuery = trpc.clinic.listPaymentBanks.useQuery(undefined, { enabled: operationalRole === "admin" || operationalRole === "cashier", retry: false });
   const currentShiftInput = useMemo(() => ({ shiftDate: getClinicShiftDateKey(), shiftType: serverShiftByLabel[shift] }), [shift]);
   const currentShiftQuery = trpc.shifts.current.useQuery(currentShiftInput, { enabled: Boolean(operationalRole), retry: false });
   const trpcUtils = trpc.useUtils();
@@ -114,9 +115,11 @@ export default function Home() {
   const registerMutation = trpc.patients.register.useMutation();
   const followUpMutation = trpc.patients.addTests.useMutation();
   const paymentMutation = trpc.billing.markPaid.useMutation();
+  const addBankMutation = trpc.clinic.addPaymentBank.useMutation();
+  const removeBankMutation = trpc.clinic.removePaymentBank.useMutation();
   const cancelMutation = trpc.billing.cancel.useMutation();
   const refundMutation = trpc.billing.refund.useMutation();
-  const resultMutation = trpc.laboratory.saveResult.useMutation();
+  const batchResultMutation = trpc.laboratory.saveResults.useMutation();
   const collectMutation = trpc.laboratory.collectSample.useMutation();
   const openShiftMutation = trpc.shifts.open.useMutation();
   const saveSettingsMutation = trpc.clinic.saveSettings.useMutation();
@@ -174,6 +177,9 @@ export default function Home() {
         databaseInvoiceId: latest?.id,
         invoiceStatus,
         invoiceTotal: latest?.total ?? 0,
+        paymentMethod: latest?.paymentMethod,
+        paymentBank: latest?.paymentBank,
+        transactionNumber: latest?.transactionNumber,
         invoiceLines,
         consultationType,
         consultationFee: latest?.consultationFee ?? 0,
@@ -221,6 +227,9 @@ export default function Home() {
         databaseInvoiceId: invoice.id,
         invoiceStatus: invoice.status,
         invoiceTotal: invoice.total,
+        paymentMethod: invoice.paymentMethod,
+        paymentBank: invoice.paymentBank,
+        transactionNumber: invoice.transactionNumber,
         invoice: invoice.invoiceNumber,
         invoiceLines,
         invoiceTests: codes,
@@ -244,6 +253,9 @@ export default function Home() {
   const savedResults = derived.results;
   const selectedPatient = patients.find(patient => patient.id === selectedPatientId) ?? patients[0] ?? EMPTY_PATIENT;
   const selectedTest = catalog.find(test => test.code === selectedTestCode) ?? catalog.find(test => patientHasCode(selectedPatient, test.code)) ?? catalog[0] ?? DEFAULT_CATALOG[0];
+  const selectedDraftKey = `${selectedPatient.id}-${selectedTest.code}`;
+  const resultDraft = resultDrafts[selectedDraftKey] ?? savedResults[selectedDraftKey] ?? {};
+  const setResultDraft = (draft: FieldValue) => setResultDrafts(current => ({ ...current, [selectedDraftKey]: draft }));
   const pageTitle = sectionLabels[activeSection];
   const visibleShiftSequence = operationalRole && currentShiftQuery.isSuccess ? currentShiftQuery.data?.sequenceCurrent ?? 0 : 0;
   const clinicSettings = clinicQuery.data;
@@ -270,7 +282,6 @@ export default function Home() {
     const fallback = selectedPatient.tests[0] ?? catalog[0]?.code ?? "";
     if (!selectedTestCode || !catalog.some(test => test.code === selectedTestCode)) {
       setSelectedTestCode(fallback);
-      setResultDraft(savedResults[`${selectedPatient.id}-${fallback}`] ?? {});
     }
   }, [catalog, savedResults, selectedPatient.id, selectedPatient.tests, selectedTestCode]);
 
@@ -363,14 +374,15 @@ export default function Home() {
     });
   };
 
-  const handleMarkPaid = (patient: Patient) => {
+  const handleMarkPaid = (patient: Patient, payment: { paymentMethod: "cash" | "bank"; paymentBank?: string; transactionNumber?: string }) => {
     if (!patient.databaseInvoiceId) {
       setToast("لا توجد فاتورة محفوظة لهذا السجل");
       return;
     }
-    paymentMutation.mutate({ invoiceId: patient.databaseInvoiceId, paymentMethod: "cash" }, {
+    paymentMutation.mutate({ invoiceId: patient.databaseInvoiceId, ...payment }, {
       onSuccess: () => {
         invalidateWorkspace();
+        void trpcUtils.clinic.listPaymentBanks.invalidate();
         setToast(`تم تحصيل الفاتورة ${patient.invoice} وتفعيل طلباتها المخبرية`);
       },
       onError: error => setToast(`لم يُسجل التحصيل: ${error.message}`),
@@ -402,18 +414,18 @@ export default function Home() {
       setToast("لا يمكن حفظ النتيجة قبل اكتمال الدفع");
       return;
     }
-    if (!selectedPatient.tests.includes(selectedTest.code)) {
-      setToast("لا يمكن إصدار نتيجة لفحص غير موجود في طلب المريض");
-      return;
-    }
-    const labOrderId = selectedPatient.orderIds?.[selectedTest.code];
-    if (!labOrderId) {
-      setToast("لا يوجد طلب مخبري دائم لهذا الفحص");
-      return;
-    }
-    resultMutation.mutate({ labOrderId, values: resultDraft, remarks: resultDraft.remarks }, {
-      onSuccess: () => { invalidateWorkspace(); setToast(`حُفظت نتيجة ${selectedTest.code} في سجل المختبر`); },
-      onError: error => setToast(`لم تُحفظ النتيجة: ${error.message}`),
+    const results = selectedPatient.tests.map(code => {
+      const test = catalog.find(item => item.code === code);
+      const key = `${selectedPatient.id}-${code}`;
+      const values = resultDrafts[key] ?? savedResults[key] ?? {};
+      return { code, test, labOrderId: selectedPatient.orderIds?.[code], values };
+    });
+    const invalid = results.find(item => !item.labOrderId);
+    if (invalid) { setToast(`لا يوجد طلب مخبري محفوظ للفحص ${invalid.code}`); return; }
+    const blankFields = results.flatMap(item => (item.test?.fields ?? []).filter(field => !item.values[field.key]?.trim()).map(field => `${item.code}: ${field.label}`));
+    batchResultMutation.mutate({ results: results.map(item => ({ labOrderId: item.labOrderId!, values: item.values, remarks: item.values.remarks })) }, {
+      onSuccess: () => { invalidateWorkspace(); setToast(`تم حفظ نتائج الفحوصات جميعها (${results.length}) للمريض ${selectedPatient.name}${blankFields.length ? ` · تنبيه: ${blankFields.length} خانة اختيارية فارغة` : ""}`); },
+      onError: error => setToast(`لم تُحفظ النتائج: ${error.message}`),
     });
   };
 
@@ -466,15 +478,14 @@ export default function Home() {
       return <Patients patients={patients} search={search} setSearch={setSearch} onAddPatient={() => setShowPatientDialog(true)} onSelectPatient={setDrawerPatient} onPrintInvoice={patient => triggerPrint("invoice", patient)} />;
     }
     if (activeSection === "billing") {
-      return <Billing patients={billingPatients} catalog={catalog} prices={prices} onAddPatient={() => setShowPatientDialog(true)} onAddInvoice={() => openExistingInvoice()} onPrintInvoice={patient => triggerPrint("invoice", patient)} onEditInvoice={patient => patient.databaseInvoiceId && setEditorInvoiceId(patient.databaseInvoiceId)} onMarkPaid={handleMarkPaid} onCancel={handleCancelInvoice} onRefund={handleRefundInvoice} saving={paymentMutation.isPending || cancelMutation.isPending || refundMutation.isPending || followUpMutation.isPending} canManage={effectiveRole === "admin" || effectiveRole === "cashier"} />;
+      return <Billing patients={billingPatients} catalog={catalog} prices={prices} banks={(paymentBanksQuery.data ?? []).map(bank => ({ id: bank.id, name: bank.name }))} onAddPatient={() => setShowPatientDialog(true)} onAddInvoice={() => openExistingInvoice()} onPrintInvoice={patient => triggerPrint("invoice", patient)} onEditInvoice={patient => patient.databaseInvoiceId && setEditorInvoiceId(patient.databaseInvoiceId)} onMarkPaid={handleMarkPaid} onCancel={handleCancelInvoice} onRefund={handleRefundInvoice} saving={paymentMutation.isPending || cancelMutation.isPending || refundMutation.isPending || followUpMutation.isPending} canManage={effectiveRole === "admin" || effectiveRole === "cashier"} />;
     }
     if (activeSection === "lab") {
       return <Lab patients={patients} catalog={catalog} prices={prices} selectedPatientId={selectedPatient.id} setSelectedPatientId={id => {
         setSelectedPatientId(id);
         const nextCode = patients.find(patient => patient.id === id)?.tests[0] ?? catalog[0]?.code ?? "";
         setSelectedTestCode(nextCode);
-        setResultDraft(savedResults[`${id}-${nextCode}`] ?? {});
-      }} selectedTestCode={selectedTest.code} setSelectedTestCode={code => { setSelectedTestCode(code); setResultDraft(savedResults[`${selectedPatient.id}-${code}`] ?? {}); }} results={savedResults} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} onPrintResult={() => triggerPrint("result")} onCollectSample={handleCollectSample} savingResult={resultMutation.isPending} collectingSample={collectMutation.isPending} />;
+      }} selectedTestCode={selectedTest.code} setSelectedTestCode={code => setSelectedTestCode(code)} results={{ ...savedResults, ...resultDrafts }} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} onPrintResult={() => triggerPrint("result")} onCollectSample={handleCollectSample} savingResult={batchResultMutation.isPending} collectingSample={collectMutation.isPending} />;
     }
     if (activeSection === "tests") {
       return <CatalogPanel catalog={catalog} prices={prices} canEditDefinitions={effectiveRole === "admin"} canEditPrices={effectiveRole === "admin" || effectiveRole === "supervisor"} onToast={setToast} onChanged={() => { void trpcUtils.catalog.list.invalidate(); void trpcUtils.pricing.get.invalidate(); }} />;
@@ -485,7 +496,7 @@ export default function Home() {
     if (activeSection === "users") {
       return <TeamPanel role={effectiveRole} onToast={setToast} />;
     }
-    return <Settings role={effectiveRole} shift={shift} setShift={setShift} settings={clinicSettings} canSave={effectiveRole === "admin"} saving={saveSettingsMutation.isPending} onSave={handleSaveSettings} />;
+    return <Settings role={effectiveRole} shift={shift} setShift={setShift} settings={clinicSettings} canSave={effectiveRole === "admin"} saving={saveSettingsMutation.isPending} onSave={handleSaveSettings} banks={(paymentBanksQuery.data ?? []).map(bank => ({ id: bank.id, name: bank.name }))} onAddBank={name => addBankMutation.mutate({ name }, { onSuccess: () => { void trpcUtils.clinic.listPaymentBanks.invalidate(); setToast("تمت إضافة البنك"); }, onError: error => setToast(`تعذرت إضافة البنك: ${error.message}`) })} onRemoveBank={id => removeBankMutation.mutate({ id }, { onSuccess: () => { void trpcUtils.clinic.listPaymentBanks.invalidate(); setToast("تم تعطيل البنك"); }, onError: error => setToast(`تعذر تعطيل البنك: ${error.message}`) })} />;
   };
 
   if (authQuery.isLoading) {
@@ -517,7 +528,7 @@ export default function Home() {
   }
 
   if (printMode) {
-    return <PrintDocument mode={printMode} patient={printPatientSnapshot ?? selectedPatient} selectedTest={selectedTest} result={savedResults[`${selectedPatient.id}-${selectedTest.code}`] ?? resultDraft} reportPatients={billingPatients.length ? billingPatients : patients} reportRange={printReportRange} clinic={printClinic} catalog={catalog} prices={prices} onClose={() => { setPrintMode(null); setPrintPatientSnapshot(null); }} />;
+    return <PrintDocument mode={printMode} patient={printPatientSnapshot ?? selectedPatient} selectedTest={selectedTest} result={savedResults[`${selectedPatient.id}-${selectedTest.code}`] ?? resultDraft} results={{ ...savedResults, ...resultDrafts }} reportPatients={billingPatients.length ? billingPatients : patients} reportRange={printReportRange} clinic={printClinic} catalog={catalog} prices={prices} onClose={() => { setPrintMode(null); setPrintPatientSnapshot(null); }} />;
   }
 
   const navBadge = (id: Section) => {

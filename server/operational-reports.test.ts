@@ -63,6 +63,13 @@ describe("operational report periods in Africa/Khartoum", () => {
     expect(report.collectedTotal).toBe(43000);
     expect(report.collectedInvoices.map(row => row.invoiceNumber)).toEqual(["INV-0", "INV-1"]);
   });
+
+  it("reports bank collection by bank name and preserves the invoice reference", () => {
+    const bankInvoice = invoice({ status: "paid", paidAt: new Date("2026-11-21T02:00:00.000Z"), paymentMethod: "bank", paymentBank: "بنكك", transactionNumber: "0427" });
+    const report = buildOperationalReport(getReportWindow("daily", "2026-11-21"), [bankInvoice], [bankInvoice]);
+    expect(report.paymentBreakdown).toEqual([{ method: "بنكي · بنكك", count: 1, total: 35000 }]);
+    expect(report.collectedInvoices[0]).toMatchObject({ paymentBank: "بنكك", transactionNumber: "0427" });
+  });
 });
 
 describe("report PDF download authorization and response", () => {

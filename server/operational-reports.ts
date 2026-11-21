@@ -22,6 +22,8 @@ export type ReportInvoiceRow = {
   total: number;
   status: "pending" | "paid" | "cancelled" | "refunded";
   paymentMethod: string | null;
+  paymentBank?: string | null;
+  transactionNumber?: string | null;
   consultationType?: ConsultationType | null;
   consultationFee?: number | null;
 };
@@ -196,7 +198,7 @@ export function buildOperationalReport(
 
   const paymentMap = new Map<string, PaymentBreakdownRow>();
   for (const row of collectedInvoices) {
-    const method = row.paymentMethod?.trim() || "غير محدد";
+    const method = row.paymentMethod === "bank" ? `بنكي${row.paymentBank ? ` · ${row.paymentBank}` : ""}` : row.paymentMethod === "cash" ? "نقدي" : row.paymentMethod?.trim() || "غير محدد";
     const current = paymentMap.get(method) ?? { method, count: 0, total: 0 };
     current.count += 1;
     current.total += row.total;

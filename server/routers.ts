@@ -23,6 +23,7 @@ import {
   labResults,
   labTests,
   patients,
+  paymentBanks,
   priceChanges,
   shifts,
   staffMembers,
@@ -304,6 +305,25 @@ export const appRouter = router({
       }
       const result = await db.insert(clinicSettings).values(input);
       return { id: result[0].insertId, updated: false };
+    }),
+    listPaymentBanks: roleProcedure("cashier", "admin").query(async () => {
+      const db = await getDb();
+      if (!db) return [{ id: 0, name: "بنكك", active: 1 }, { id: 0, name: "أوكاش", active: 1 }, { id: 0, name: "فوري", active: 1 }];
+      const existing = await db.select({ id: paymentBanks.id }).from(paymentBanks).limit(1);
+      if (!existing.length) await db.insert(paymentBanks).values([{ name: "بنكك" }, { name: "أوكاش" }, { name: "فوري" }]).onDuplicateKeyUpdate({ set: { active: 1 } });
+      return db.select().from(paymentBanks).where(eq(paymentBanks.active, 1)).orderBy(paymentBanks.id);
+    }),
+    addPaymentBank: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(120) })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      await db.insert(paymentBanks).values({ name: input.name }).onDuplicateKeyUpdate({ set: { active: 1 } });
+      return { success: true };
+    }),
+    removePaymentBank: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      await db.update(paymentBanks).set({ active: 0 }).where(eq(paymentBanks.id, input.id));
+      return { success: true };
     }),
   }),
 
@@ -704,7 +724,11 @@ export const appRouter = router({
       const tests = testIds.length ? await db.select().from(labTests).where(inArray(labTests.id, testIds)) : [];
       return { invoice, patient: patient ?? null, items, orders, tests };
     }),
-    markPaid: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive(), paymentMethod: z.string().max(40).default("cash") })).mutation(async ({ input }) => {
+    markPaid: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive(), paymentMethod: z.enum(["cash", "bank"]), paymentBank: z.string().trim().min(1).max(120).optional(), transactionNumber: z.string().regex(/^\d{4}$/).optional() }).superRefine((value, ctx) => {
+      if (value.paymentMethod === "bank" && !value.paymentBank) ctx.addIssue({ code: "custom", message: "اختر البنك" });
+      if (value.paymentMethod === "bank" && !value.transactionNumber) ctx.addIssue({ code: "custom", message: "رقم العملية يجب أن يتكون من 4 أرقام" });
+      if (value.paymentMethod === "cash" && (value.paymentBank || value.transactionNumber)) ctx.addIssue({ code: "custom", message: "بيانات البنك غير مطلوبة للدفع النقدي" });
+    })).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
@@ -714,7 +738,11 @@ export const appRouter = router({
         if (invoice.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة ملغاة" });
         if (invoice.status === "refunded") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة مسترجعة" });
         if (invoice.status === "paid") return { success: true, alreadyPaid: true } as const;
-        await tx.update(invoices).set({ status: "paid", paymentMethod: input.paymentMethod, paidAt: new Date() }).where(eq(invoices.id, input.invoiceId));
+        if (input.paymentMethod === "bank") {
+          const [bank] = await tx.select({ id: paymentBanks.id }).from(paymentBanks).where(and(eq(paymentBanks.name, input.paymentBank!), eq(paymentBanks.active, 1))).limit(1);
+          if (!bank) throw new TRPCError({ code: "BAD_REQUEST", message: "البنك المحدد غير متاح" });
+        }
+        await tx.update(invoices).set({ status: "paid", paymentMethod: input.paymentMethod, paymentBank: input.paymentBank ?? null, transactionNumber: input.transactionNumber ?? null, paidAt: new Date() }).where(eq(invoices.id, input.invoiceId));
         await tx.update(labOrders).set({ status: "queued" })
           .where(and(eq(labOrders.invoiceId, input.invoiceId), eq(labOrders.status, "blocked")));
         return { success: true, alreadyPaid: false } as const;
@@ -796,6 +824,25 @@ export const appRouter = router({
       await db.update(labOrders).set({ status: "completed", resultIssuedAt: new Date(), collectedAt: order.collectedAt ?? new Date() }).where(eq(labOrders.id, input.labOrderId));
       return { success: true } as const;
     }),
+    saveResults: roleProcedure("lab").input(z.object({ results: z.array(resultInput).min(1).max(50) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      if (new Set(input.results.map(result => result.labOrderId)).size !== input.results.length) throw new TRPCError({ code: "BAD_REQUEST", message: "توجد طلبات مكررة في الحفظ" });
+      await db.transaction(async tx => {
+        for (const result of input.results) {
+          const [order] = await tx.select().from(labOrders).where(eq(labOrders.id, result.labOrderId)).limit(1);
+          if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "أحد طلبات المختبر غير موجود" });
+          const [invoice] = await tx.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, order.invoiceId)).limit(1);
+          if (!invoice || invoice.status !== "paid") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن إصدار النتائج قبل اكتمال الدفع" });
+          const [existing] = await tx.select({ id: labResults.id }).from(labResults).where(eq(labResults.labOrderId, result.labOrderId)).limit(1);
+          const fields = { valuesJson: JSON.stringify(result.values), remarks: result.remarks, technicianUserId: ctx.user.id };
+          if (existing) await tx.update(labResults).set(fields).where(eq(labResults.id, existing.id));
+          else await tx.insert(labResults).values({ labOrderId: result.labOrderId, ...fields });
+          await tx.update(labOrders).set({ status: "completed", resultIssuedAt: new Date(), collectedAt: order.collectedAt ?? new Date() }).where(eq(labOrders.id, result.labOrderId));
+        }
+      });
+      return { success: true, savedCount: input.results.length } as const;
+    }),
   }),
 
   reports: router({
@@ -815,6 +862,8 @@ export const appRouter = router({
           total: invoices.total,
           status: invoices.status,
           paymentMethod: invoices.paymentMethod,
+          paymentBank: invoices.paymentBank,
+          transactionNumber: invoices.transactionNumber,
           consultationType: invoices.consultationType,
           consultationFee: invoices.consultationFee,
         }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
@@ -829,6 +878,8 @@ export const appRouter = router({
           total: invoices.total,
           status: invoices.status,
           paymentMethod: invoices.paymentMethod,
+          paymentBank: invoices.paymentBank,
+          transactionNumber: invoices.transactionNumber,
           consultationType: invoices.consultationType,
           consultationFee: invoices.consultationFee,
         }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
@@ -867,6 +918,8 @@ export const appRouter = router({
         total: invoices.total,
         status: invoices.status,
         paymentMethod: invoices.paymentMethod,
+        paymentBank: invoices.paymentBank,
+        transactionNumber: invoices.transactionNumber,
         consultationType: invoices.consultationType,
         consultationFee: invoices.consultationFee,
       }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
