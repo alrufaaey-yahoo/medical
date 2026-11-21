@@ -79,16 +79,23 @@ describe("user administration API permissions", () => {
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("rejects invalid catalog codes before database access", async () => {
-    const caller = createCaller({ id: 7, role: "supervisor" } as TestUser);
+  it("keeps test definitions admin-only even for the operations supervisor", async () => {
+    const caller = createCaller({ id: 2, role: "supervisor" } as TestUser);
 
     await expect(caller.catalog.save({
-      code: "CBC عربي",
+      code: "CBC",
       nameAr: "صورة الدم",
       price: 100,
       fieldsJson: "[]",
       active: 1,
-    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("lets the supervisor reach price updates and validates their input", async () => {
+    const caller = createCaller({ id: 2, role: "supervisor" } as TestUser);
+
+    await expect(caller.catalog.updatePrices({ items: [] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.pricing.updateConsultation({ generalPrice: -1, specialistPrice: 50000 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("denies cashier callers from closing a shift", async () => {

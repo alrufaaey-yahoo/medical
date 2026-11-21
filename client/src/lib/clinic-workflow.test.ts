@@ -5,6 +5,7 @@ import {
   formatClinicDateFromKey,
   getClinicDateKey,
   getClinicReportDateKey,
+  getClinicShiftDateKey,
   getCurrentClinicShift,
   getNextPatientIdentity,
   isHttpsLogoUrl,
@@ -12,17 +13,17 @@ import {
 
 describe("clinic shift and registration identifiers", () => {
   it("assigns the three configured shifts at their boundary hours", () => {
-    expect(getCurrentClinicShift(new Date(2026, 10, 21, 7, 59))).toBe("سهرة");
-    expect(getCurrentClinicShift(new Date(2026, 10, 21, 8, 0))).toBe("صباحية");
-    expect(getCurrentClinicShift(new Date(2026, 10, 21, 13, 59))).toBe("صباحية");
-    expect(getCurrentClinicShift(new Date(2026, 10, 21, 14, 0))).toBe("مسائية");
-    expect(getCurrentClinicShift(new Date(2026, 10, 21, 21, 59))).toBe("مسائية");
-    expect(getCurrentClinicShift(new Date(2026, 10, 21, 22, 0))).toBe("سهرة");
+    expect(getCurrentClinicShift(new Date("2026-11-21T05:59:00.000Z"))).toBe("سهرة");
+    expect(getCurrentClinicShift(new Date("2026-11-21T06:00:00.000Z"))).toBe("صباحية");
+    expect(getCurrentClinicShift(new Date("2026-11-21T11:59:00.000Z"))).toBe("صباحية");
+    expect(getCurrentClinicShift(new Date("2026-11-21T12:00:00.000Z"))).toBe("مسائية");
+    expect(getCurrentClinicShift(new Date("2026-11-21T19:59:00.000Z"))).toBe("مسائية");
+    expect(getCurrentClinicShift(new Date("2026-11-21T20:00:00.000Z"))).toBe("سهرة");
   });
 
   it("uses local calendar dates, including month and year boundaries", () => {
-    expect(getClinicDateKey(new Date(2026, 11, 31, 23, 59))).toBe("2026-12-31");
-    expect(getClinicDateKey(new Date(2027, 0, 1, 0, 1))).toBe("2027-01-01");
+    expect(getClinicDateKey(new Date("2026-12-31T21:59:00.000Z"))).toBe("2026-12-31");
+    expect(getClinicDateKey(new Date("2026-12-31T22:01:00.000Z"))).toBe("2027-01-01");
     expect(formatClinicDateFromKey("2026-11-21")).not.toBe("2026-11-21");
     expect(formatClinicDateFromKey("invalid-date")).toBe("invalid-date");
   });
@@ -30,6 +31,13 @@ describe("clinic shift and registration identifiers", () => {
   it("uses Africa/Khartoum when selecting the date for official reports", () => {
     expect(getClinicReportDateKey(new Date("2026-11-21T22:30:00.000Z"))).toBe("2026-11-22");
     expect(getClinicReportDateKey(new Date("2026-12-31T22:30:00.000Z"))).toBe("2027-01-01");
+  });
+
+  it("keeps the night shift on its starting date after midnight", () => {
+    expect(getClinicShiftDateKey(new Date("2026-11-21T19:30:00.000Z"))).toBe("2026-11-21");
+    expect(getClinicShiftDateKey(new Date("2026-11-21T22:30:00.000Z"))).toBe("2026-11-21");
+    expect(getClinicShiftDateKey(new Date("2026-11-22T05:00:00.000Z"))).toBe("2026-11-21");
+    expect(getClinicShiftDateKey(new Date("2026-11-22T06:00:00.000Z"))).toBe("2026-11-22");
   });
 
   it("accepts HTTPS clinic logo links and allows clearing the optional link", () => {
@@ -92,6 +100,8 @@ describe("clinic shift and registration identifiers", () => {
       invoice: "INV-260022",
       invoiceTests: ["BFFM"],
       consultationIncluded: false,
+      consultationType: "none",
+      consultationFee: 0,
       paid: false,
       status: "في الانتظار",
     });

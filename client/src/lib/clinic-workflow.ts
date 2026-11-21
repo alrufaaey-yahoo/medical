@@ -15,11 +15,13 @@ export type FollowUpPatient = {
   invoice: string;
   invoiceTests?: string[];
   consultationIncluded?: boolean;
+  consultationType?: "none" | "general" | "specialist";
+  consultationFee?: number;
   paid: boolean;
   status: "في الانتظار" | "في المختبر" | "مكتملة";
 };
 
-export type ReportRange = "today" | "month";
+export type ReportRange = "today" | "week" | "month";
 
 export type DatedClinicRecord = {
   registeredDate?: string;
@@ -39,19 +41,28 @@ export function isHttpsLogoUrl(value: string): boolean {
 }
 
 const arabicDateFormatter = new Intl.DateTimeFormat("ar-SD", {
+  timeZone: CLINIC_TIME_ZONE,
   day: "numeric",
   month: "long",
   year: "numeric",
 });
 
 const arabicTimeFormatter = new Intl.DateTimeFormat("ar-SD", {
+  timeZone: CLINIC_TIME_ZONE,
   hour: "numeric",
   minute: "2-digit",
   hour12: true,
 });
 
+function clinicHour(date: Date): number {
+  return Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: CLINIC_TIME_ZONE,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(date));
+}
 export function getCurrentClinicShift(date = new Date()): ClinicShift {
-  const hour = date.getHours();
+  const hour = clinicHour(date);
   if (hour >= 8 && hour < 14) return "صباحية";
   if (hour >= 14 && hour < 22) return "مسائية";
   return "سهرة";
@@ -68,10 +79,19 @@ export function formatClinicDateFromKey(dateKey: string): string {
 }
 
 export function getClinicDateKey(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  // The clinic runs on Khartoum time, so the working day must not depend on the
+  // server or browser timezone (a 00:30 Khartoum invoice belongs to the new day).
+  return getClinicReportDateKey(date);
+}
+export function getClinicShiftDateKey(date = new Date()): string {
+  // A night shift that starts at 22:00 keeps the date of its start even after
+  // midnight, so 00:30 belongs to yesterday's night shift.
+  const key = getClinicReportDateKey(date);
+  if (clinicHour(date) >= 8) return key;
+  const [year, month, day] = key.split("-").map(Number);
+  const previous = new Date(Date.UTC(year, month - 1, day));
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}-${String(previous.getUTCDate()).padStart(2, "0")}`;
 }
 
 export function getClinicReportDateKey(date = new Date()): string {
@@ -90,9 +110,14 @@ export function formatClinicTime(date = new Date()): string {
 
 export function filterRecordsByReportRange<T extends DatedClinicRecord>(records: T[], range: ReportRange, currentDate = getClinicDateKey()): T[] {
   const currentMonth = currentDate.slice(0, 7);
+  const [year, month, day] = currentDate.split("-").map(Number);
+  const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const weekStart = new Date(Date.UTC(year, month - 1, day - dayOfWeek)).toISOString().slice(0, 10);
   return records.filter((record) => {
     if (!record.registeredDate) return true;
-    return range === "today" ? record.registeredDate === currentDate : record.registeredDate.startsWith(currentMonth);
+    if (range === "today") return record.registeredDate === currentDate;
+    if (range === "week") return record.registeredDate >= weekStart && record.registeredDate <= currentDate;
+    return record.registeredDate.startsWith(currentMonth);
   });
 }
 
@@ -134,6 +159,8 @@ export function createFollowUpInvoice<T extends FollowUpPatient>(
     invoice,
     invoiceTests: newTests,
     consultationIncluded: false,
+    consultationType: "none",
+    consultationFee: 0,
     paid: false,
     status: "في الانتظار",
   };

@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, staffMembers, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -86,6 +86,28 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+/**
+ * Applies the role from the staff roster when a matching account signs in.
+ * Only accounts that still have the default `user` role are touched, so an
+ * explicit role change by an administrator is never overwritten.
+ */
+export async function applyStaffRole(userId: number, email: string | null | undefined): Promise<boolean> {
+  const normalized = email?.trim().toLowerCase();
+  if (!normalized) return false;
+  const db = await getDb();
+  if (!db) return false;
+  const [member] = await db.select({ id: staffMembers.id, role: staffMembers.role, active: staffMembers.active })
+    .from(staffMembers)
+    .where(and(eq(staffMembers.email, normalized), eq(staffMembers.active, 1)))
+    .limit(1);
+  if (!member) return false;
+  const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!account || account.role !== "user") return false;
+  await db.update(users).set({ role: member.role }).where(eq(users.id, userId));
+  await db.update(staffMembers).set({ userId }).where(eq(staffMembers.id, member.id));
+  return true;
 }
 
 // TODO: add feature queries here as your schema grows.

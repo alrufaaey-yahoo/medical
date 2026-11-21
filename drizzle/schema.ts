@@ -21,6 +21,9 @@ export const clinicSettings = mysqlTable("clinic_settings", {
   email: varchar("email", { length: 180 }),
   website: varchar("website", { length: 180 }),
   footerText: text("footerText"),
+  // Consultation (doctor visit) pricing, editable by the operations supervisor.
+  consultationGeneralPrice: int("consultationGeneralPrice").default(35000).notNull(),
+  consultationSpecialistPrice: int("consultationSpecialistPrice").default(50000).notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
@@ -64,6 +67,7 @@ export const labTests = mysqlTable("lab_tests", {
   nameEn: varchar("nameEn", { length: 180 }),
   category: varchar("category", { length: 100 }),
   sample: varchar("sample", { length: 120 }),
+  turnaround: varchar("turnaround", { length: 60 }),
   price: int("price").default(0).notNull(),
   fieldsJson: text("fieldsJson"),
   active: int("active").default(1).notNull(),
@@ -76,6 +80,9 @@ export const invoices = mysqlTable("invoices", {
   patientId: int("patientId").notNull(),
   shiftId: int("shiftId"),
   total: int("total").default(0).notNull(),
+  // Snapshot of the doctor consultation sold with this invoice.
+  consultationType: mysqlEnum("consultationType", ["none", "general", "specialist"]).default("none").notNull(),
+  consultationFee: int("consultationFee").default(0).notNull(),
   status: mysqlEnum("status", ["pending", "paid", "cancelled", "refunded"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 40 }),
   createdBy: int("createdBy"),
@@ -130,6 +137,35 @@ export const labResults = mysqlTable("lab_results", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/**
+ * Staff roster managed by the operations supervisor: lab technicians and
+ * cashiers are added here before they sign in. When a Manus account with the
+ * same email signs in, its role is linked automatically.
+ */
+export const staffMembers = mysqlTable("staff_members", {
+  id: int("id").autoincrement().primaryKey(),
+  fullName: varchar("fullName", { length: 180 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 60 }),
+  role: mysqlEnum("staffRole", ["cashier", "lab", "supervisor"]).notNull(),
+  active: int("active").default(1).notNull(),
+  userId: int("userId"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("staff_members_email_unique").on(table.email)]);
+
+/** Audit trail for price changes (catalog tests and consultation fees). */
+export const priceChanges = mysqlTable("price_changes", {
+  id: int("id").autoincrement().primaryKey(),
+  entity: mysqlEnum("entity", ["lab_test", "consultation"]).notNull(),
+  reference: varchar("reference", { length: 40 }).notNull(),
+  oldPrice: int("oldPrice").notNull(),
+  newPrice: int("newPrice").notNull(),
+  changedBy: int("changedBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ClinicSettings = typeof clinicSettings.$inferSelect;
@@ -139,3 +175,5 @@ export type Invoice = typeof invoices.$inferSelect;
 export type LabOrder = typeof labOrders.$inferSelect;
 export type LabResult = typeof labResults.$inferSelect;
 export type InvoiceAdjustment = typeof invoiceAdjustments.$inferSelect;
+export type StaffMember = typeof staffMembers.$inferSelect;
+export type PriceChange = typeof priceChanges.$inferSelect;

@@ -317,6 +317,11 @@ class SDKServer {
       throw ForbiddenError("User not found");
     }
 
+    if (user.role === "user" && user.email) {
+      const applied = await db.applyStaffRole(user.id, user.email);
+      if (applied) user = (await db.getUserByOpenId(session.openId)) ?? user;
+    }
+
     await db.upsertUser({
       openId: user.openId,
       lastSignedIn: signedInAt,

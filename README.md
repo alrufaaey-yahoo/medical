@@ -1,14 +1,114 @@
-# مستوصف بكّا الطبي الحديث
+# مستوصف بكّا الطبي الحديث — نظام إدارة المستوصف والمعمل
 
-React / Express / tRPC / Drizzle starter, adapted from the Sandbox web-db-user template.
+تطبيق تشغيل متكامل لمستوصف/معمل طبي: استقبال ومرضى وفواتير، معمل ونتائج، تسعير وسجل تدقيق، تقارير تشغيلية PDF، وورديات وصلاحيات حسب الدور. الواجهة عربية من اليمين إلى اليسار، والقاعدة MariaDB، والخادم Express + tRPC + Drizzle.
 
-- `pnpm dev`: development server; honors `PORT` (default 3000).
-- `pnpm build` / `pnpm start`: build and serve `dist/index.js` and `dist/public/`.
-- `pnpm db:migrate`: apply checked-in migrations. `pnpm db:push`: generate and apply new schema changes.
-- `pnpm check` / `pnpm test`: types and application tests.
+## المكوّنات
 
-Start with the Webdev skill's default-template guide. Platform login, storage, payments and service contracts live in its shared references; read the relevant capability before extending its helper.
+| الطبقة | التقنية |
+| --- | --- |
+| الواجهة | React 19 + Vite + TypeScript، تصميم عربي RTL |
+| الخادم | Express + tRPC v11 + Superjson |
+| قاعدة البيانات | MariaDB/MySQL عبر Drizzle ORM |
+| التقارير | HTML عربي A4 يُطبع PDF عبر Chromium، مع PDFKit كخطة بديلة |
+| الاختبارات | Vitest (وحدات الخادم والواجهة) |
 
-`server/_core/publicConfig.ts` exposes only named public runtime values. Private keys stay server-side. The platform serves managed `/manus-storage/` assets; the application does not register a second proxy.
+## الصلاحيات والأدوار
 
-Platform configuration is readable and editable through `webdev.config`. Default settings are initial values, not enforced constraints. The agent may modify the files, commands and configuration or follow the flexible guide for another stack.
+| الدور | الأقسام المتاحة | أهم الصلاحيات |
+| --- | --- | --- |
+| مدير النظام `admin` | كل الأقسام | إدارة الفحوصات والأسعار والمستخدمين والإعدادات والمختبر والتقارير |
+| مشرف التشغيل `supervisor` | التقارير، الفحوصات والتسعير، فريق التشغيل | تقارير يومية/أسبوعية/شهرية، تعديل الأسعار وسعر المعاينة، إضافة كاشير وفني مختبر، ولا يصل إلى المرضى أو المختبر، ولا يعدّل تعريف الفحوصات |
+| كاشير/استقبال `cashier` | نظرة عامة، المرضى، الفواتير، التقارير | تسجيل مريض جديد، فاتورة لمريض موجود، تعديل/إلغاء/استرجاع الفاتورة، التحصيل، وتقرير ورديته فقط |
+| فني المختبر `lab` | نظرة عامة، المختبر، الفحوصات والتسعير (قراءة) | سحب العينة، إدخال النتيجة، طباعة تقرير المختبر |
+
+قواعد أساسية:
+
+- المشرف يستطيع تعديل أسعار الفحوصات وسعر المعاينة، أما إضافة/تعديل تعريف الفحص (الرمز، الحقول، المديات) فللمدير فقط.
+- الكاشير لا يستطيع فتح تقارير الفترة (يومي/أسبوعي/شهري) ولا تقرير وردية ليست مسندة إليه؛ يُفتح تقريره تلقائيًا عند تسجيل أول مريض في الوردية.
+- فني المختبر لا يرى الإيرادات ولا ينشئ مرضى أو فواتير.
+- وردية السهرة تحتفظ بتاريخ بدايتها بعد منتصف الليل (00:30 تُحتسب ضمن وردية اليوم السابق).
+
+## المعاينة وسعرها
+
+عند تسجيل مريض جديد يمكن اختيار:
+
+- بدون معاينة (بدون رسوم)
+- معاينة طبيب عمومي (السعر الافتراضي 35,000 ج.س)
+- معاينة طبيب اختصاصي (السعر الافتراضي 50,000 ج.س)
+
+السعران مستقلان ويُحفظان في الفاتورة والتقرير، ويظهر نوع المعاينة في كشف الفاتورة وPDF التقارير. تعديل السعر من قسم «الفحوصات والتسعير» يُسجَّل في `price_changes` مع المنفذ والوقت.
+
+## تعديل الفاتورة
+
+تحرير الفاتورة يعيد بناء بنودها من اختيار المستخدم مع الحفاظ على أسعار البنود القديمة وقت البيع:
+
+- إضافة فحص جديد أو حذف فحص قديم.
+- تغيير نوع المعاينة أو إزالتها.
+- سبب التعديل إلزامي، ويُسجَّل المبلغ قبل/بعد والفرق في `invoice_adjustments`.
+- لا يمكن حذف فحص صدرت نتيجته.
+- إذا تغيّر الإجمالي بعد الدفع تُعاد الفاتورة إلى «بانتظار التحصيل» بدل إخفاء الفرق.
+
+## التشغيل محليًا
+
+المتطلبات: Node.js 22، pnpm، MariaDB/MySQL، وChromium لتقارير PDF (اختياري لكن مُفضّل).
+
+```bash
+pnpm install
+cp .env.example .env   # إن وُجد، أو اضبط المتغيرات أدناه
+pnpm db:migrate:app    # تطبيق الهجرات 0000 → 0005
+pnpm db:seed           # كتالوج الفحوصات وإعدادات المستوصف
+pnpm dev
+```
+
+### متغيرات البيئة
+
+| المتغير | الوصف |
+| --- | --- |
+| `DATABASE_URL` | `mysql://user:pass@127.0.0.1:3306/medical` |
+| `PORT` | منفذ الخادم (افتراضي 3000) |
+| `MANUS_JWT_SECRET` | سر توقيع الجلسات؛ يجب أن يكون ثابتًا في الإنتاج |
+| `MANUS_PROJECT_ID` | معرف المشروع على منصة Manus |
+| `ALLOW_PREVIEW_LOGIN` | `1` لتفعيل دخول المعاينة بالأدوار (يُزال في الإنتاج) |
+| `CHROMIUM_PATH` | مسار Chromium إن لم يكن `/usr/bin/chromium` |
+| `MANUS_OAUTH_API_URL` | اختياري لدخول Manus الموحد |
+
+### البناء والتشغيل الإنتاجي
+
+```bash
+pnpm check
+pnpm test
+pnpm build
+NODE_ENV=production node dist/index.js
+```
+
+## قاعدة البيانات
+
+- الهجرات: `drizzle/0000` → `drizzle/0005_lab_operations.sql`، وتُطبَّق عبر `pnpm db:migrate:app`.
+- البذور: `scripts/seed.ts` (11 فحصًا، إعدادات المستوصف، سعرا المعاينة).
+- الجداول الرئيسية: `patients`, `invoices`, `invoice_items`, `invoice_adjustments`, `lab_orders`, `lab_results`, `lab_tests`, `price_changes`, `shifts`, `user_shift_assignments`, `staff_members`, `clinic_settings`, `users`.
+- بيانات الدخول التجريبي تُنشأ تلقائيًا عند `ALLOW_PREVIEW_LOGIN=1` (مدير، مشرف، كاشير، فني مختبر) وتظهر كأزرار في شاشة الدخول.
+
+## التقارير PDF
+
+`server/report-html.ts` يبني صفحة A4 عربية (RTL) بخط Noto Sans Arabic المضمّن ثم يطبعها Chromium headless. إذا لم يتوفر Chromium يستخدم `server/report-pdf.ts` الخط البديل Amiri عبر PDFKit. يشمل التقرير:
+
+- ملخص الفواتير والتحصيل والاسترجاعات والمعاينات والفحوصات.
+- توزيع طرق الدفع.
+- جدول الفواتير مع رقم الملف والخدمة والحالة والوقت.
+- ترويسة المستوصف وبيانات التواصل من الإعدادات.
+
+نقاط النهاية: `GET /api/reports/pdf?period=daily|weekly|monthly|shift&date=YYYY-MM-DD&shiftType=morning|evening|night` — محمية بالجلسة، والكاشير لا ينزّل إلا تقرير ورديته.
+
+## الاختبارات
+
+```bash
+pnpm test
+```
+
+تغطي الاختبارات: صلاحيات الأدوار، تسجيل المرضى والفواتير وتعديلها، الورديات، إعدادات المستوصف، التقارير وصلاحيات تنزيل PDF، ودوال التاريخ/الوردية بتوقيت الخرطوم.
+
+## ملاحظات تشغيلية
+
+- جميع أوقات العرض والتقارير بتوقيت `Africa/Khartoum`، وأرقام الملفات والفواتير تعتمد تاريخ الوردية.
+- تقرير الوردية يعتمد على إسناد الكاشير للوردية؛ الإسناد يتم من «فريق التشغيل» أو تلقائيًا عند تسجيل أول مريض.
+- ملفات PDF لا تُخزَّن على الخادم؛ تُولَّد عند الطلب وتُرسل مباشرة.

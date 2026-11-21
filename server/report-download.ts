@@ -3,6 +3,7 @@ import { InvalidReportRequestError, OperationalReport, ReportWindow, getReportWi
 export type ReportDownloadInput = {
   period: unknown;
   date: unknown;
+  shiftType?: unknown;
   role: string | null | undefined;
 };
 
@@ -44,7 +45,7 @@ export async function createReportDownloadResponse(
 
   let window: ReportWindow;
   try {
-    window = getReportWindow(input.period, input.date);
+    window = getReportWindow(input.period, input.date, input.shiftType);
   } catch (error) {
     if (error instanceof InvalidReportRequestError) return { status: 400, body: { error: error.message } };
     throw error;
@@ -59,7 +60,8 @@ export async function createReportDownloadResponse(
       clinicWebsite: loaded.clinicWebsite,
       clinicFooterText: loaded.clinicFooterText,
     });
-    const filename = `clinic-report-${window.period}-${window.dateKey}.pdf`;
+    const suffix = window.period === "shift" && window.shiftType ? `-${window.shiftType}` : "";
+    const filename = `clinic-report-${window.period}${suffix}-${window.dateKey}.pdf`;
     return {
       status: 200,
       headers: {

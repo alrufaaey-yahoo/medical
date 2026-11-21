@@ -1,5 +1,17 @@
-import { COOKIE_NAME } from "@shared/const";
-import { and, desc, eq, gte, inArray, like, lt, sql } from "drizzle-orm";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import {
+  CONSULTATION_LABELS,
+  consultationFeeFor,
+  consultationTypeFromDescription,
+  describeLabTest,
+  invoiceTotal,
+  isConsultationDescription,
+  isConsultationType,
+  normalizeConsultationType,
+  resolveConsultationPrices,
+  type ConsultationType,
+} from "@shared/billing";
+import { and, desc, eq, gte, inArray, like, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -11,7 +23,9 @@ import {
   labResults,
   labTests,
   patients,
+  priceChanges,
   shifts,
+  staffMembers,
   userShiftAssignments,
   users,
 } from "../drizzle/schema";
@@ -19,9 +33,17 @@ import { getDb } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
-import { canAdminUpdateRole } from "./_core/role-access";
+import {
+  canAdminUpdateRole,
+  canAssignStaffRole,
+  canManagePrices,
+  canManageStaff,
+} from "./_core/role-access";
+import { isPreviewLoginEnabled } from "./_core/preview-auth";
+import { sdk } from "./_core/sdk";
 import { sumInvoiceItems, toInvoiceNumber, toPatientNumber, uniqueTestCodes } from "./medical-workflow";
-import { getReportWindow } from "./operational-reports";
+import { buildOperationalReport, getReportWindow, getShiftWindow } from "./operational-reports";
+import { diffCatalogPrices, diffConsultationPrices, normalizePrice } from "./pricing";
 
 const patientInput = z.object({
   name: z.string().trim().min(2).max(180),
@@ -52,17 +74,22 @@ const clinicDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }, "تاريخ الوردية غير صالح");
 
+const shiftTypeInput = z.enum(["morning", "evening", "night"]);
+const consultationTypeInput = z.enum(["none", "general", "specialist"]);
+
 const visitInput = patientInput.extend({
   shiftDate: clinicDate,
-  shiftType: z.enum(["morning", "evening", "night"]),
+  shiftType: shiftTypeInput,
   testCodes: z.array(z.string().trim().min(1).max(32)).max(50).default([]),
+  consultationType: consultationTypeInput.default("general"),
 });
 
 const followUpInput = z.object({
   patientNumber: z.string().trim().min(1).max(32),
   shiftDate: clinicDate,
-  shiftType: z.enum(["morning", "evening", "night"]),
-  testCodes: z.array(z.string().trim().min(1).max(32)).min(1).max(50),
+  shiftType: shiftTypeInput,
+  testCodes: z.array(z.string().trim().min(1).max(32)).max(50).default([]),
+  consultationType: consultationTypeInput.default("none"),
 });
 
 const labTestInput = z.object({
@@ -71,6 +98,7 @@ const labTestInput = z.object({
   nameEn: z.string().trim().max(180).optional(),
   category: z.string().trim().max(100).optional(),
   sample: z.string().trim().max(120).optional(),
+  turnaround: z.string().trim().max(60).optional(),
   price: z.number().int().min(0).max(100000000),
   fieldsJson: z.string().max(30000).refine(value => {
     try {
@@ -83,15 +111,37 @@ const labTestInput = z.object({
   active: z.number().int().min(0).max(1).default(1),
 });
 
-const CONSULTATION_FEE = 35000;
-
 const reasonInput = z.string().trim().min(3).max(500);
 const invoiceActionInput = z.object({ invoiceId: z.number().int().positive(), reason: reasonInput });
-const invoiceTestsUpdateInput = z.object({
+const invoiceEditInput = z.object({
   invoiceId: z.number().int().positive(),
   testCodes: z.array(z.string().trim().min(1).max(32)).max(50),
+  consultationType: consultationTypeInput,
   reason: reasonInput,
 });
+
+const staffInput = z.object({
+  fullName: z.string().trim().min(2).max(180),
+  email: z.string().trim().email("البريد الإلكتروني غير صالح").max(320).optional(),
+  phone: z.string().trim().max(60).optional(),
+  role: z.enum(["cashier", "lab", "supervisor"]),
+});
+
+const PREVIEW_NAMES: Record<"admin" | "supervisor" | "cashier" | "lab", string> = {
+  admin: "مدير النظام (معاينة)",
+  supervisor: "مشرف التشغيل (معاينة)",
+  cashier: "كاشير الاستقبال (معاينة)",
+  lab: "فني المختبر (معاينة)",
+};
+
+type InvoiceEditResult = {
+  invoice: typeof invoices.$inferSelect;
+  added: string[];
+  removed: string[];
+  consultationType: ConsultationType;
+  requiresRecollection: boolean;
+  delta: number;
+};
 
 export const appRouter = router({
   system: systemRouter,
@@ -101,6 +151,31 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+    previewAvailable: publicProcedure.query(() => ({ enabled: isPreviewLoginEnabled() })),
+    /**
+     * Preview-only sign in. Disabled unless ALLOW_PREVIEW_LOGIN=1 is set on an
+     * environment without Manus OAuth (see server/_core/preview-auth.ts).
+     */
+    previewLogin: publicProcedure.input(z.object({
+      role: z.enum(["admin", "supervisor", "cashier", "lab"]),
+    })).mutation(async ({ input, ctx }) => {
+      if (!isPreviewLoginEnabled()) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "الدخول التجريبي غير مفعّل في هذه البيئة" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const openId = `preview-${input.role}`;
+      await db.insert(users).values({
+        openId,
+        name: PREVIEW_NAMES[input.role],
+        email: `${openId}@preview.local`,
+        loginMethod: "preview",
+        role: input.role,
+      }).onDuplicateKeyUpdate({ set: { name: PREVIEW_NAMES[input.role], role: input.role } });
+      const token = await sdk.createSessionToken(openId, { name: PREVIEW_NAMES[input.role], expiresInMs: ONE_YEAR_MS });
+      ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
+      return { success: true, role: input.role } as const;
     }),
   }),
 
@@ -133,6 +208,85 @@ export const appRouter = router({
     }),
   }),
 
+  staff: router({
+    list: roleProcedure("supervisor").query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const rows = await db.select().from(staffMembers).orderBy(desc(staffMembers.active), staffMembers.fullName);
+      const visible = ctx.user.role === "admin" ? rows : rows.filter(row => row.role !== "supervisor");
+      const linkedIds = visible.map(row => row.userId).filter((id): id is number => id != null);
+      const linked = linkedIds.length
+        ? await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, lastSignedIn: users.lastSignedIn })
+          .from(users).where(inArray(users.id, linkedIds))
+        : [];
+      return visible.map(row => ({ ...row, account: linked.find(user => user.id === row.userId) ?? null }));
+    }),
+    create: roleProcedure("supervisor").input(staffInput).mutation(async ({ input, ctx }) => {
+      if (!canManageStaff(ctx.user.role) || !canAssignStaffRole(ctx.user.role, input.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكن لهذا الدور إضافة مستخدم بهذه الصلاحية" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const email = input.email?.trim().toLowerCase() || null;
+      if (email) {
+        const [duplicate] = await db.select({ id: staffMembers.id }).from(staffMembers).where(eq(staffMembers.email, email)).limit(1);
+        if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "يوجد مستخدم مسجل بهذا البريد الإلكتروني" });
+      }
+      const [account] = email
+        ? await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.email, email)).limit(1)
+        : [];
+      const result = await db.insert(staffMembers).values({
+        fullName: input.fullName,
+        email,
+        phone: input.phone || null,
+        role: input.role,
+        userId: account?.id ?? null,
+        createdBy: ctx.user.id,
+      });
+      // Link an existing account immediately when it has no operational role yet.
+      if (account && account.role === "user") {
+        await db.update(users).set({ role: input.role }).where(eq(users.id, account.id));
+      }
+      return { id: result[0].insertId, linked: Boolean(account) } as const;
+    }),
+    update: roleProcedure("supervisor").input(z.object({
+      id: z.number().int().positive(),
+      fullName: z.string().trim().min(2).max(180),
+      email: z.string().trim().email("البريد الإلكتروني غير صالح").max(320).nullable(),
+      phone: z.string().trim().max(60).nullable(),
+      role: z.enum(["cashier", "lab", "supervisor"]),
+      active: z.boolean(),
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [existing] = await db.select().from(staffMembers).where(eq(staffMembers.id, input.id)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "المستخدم غير موجود" });
+      if (!canManageStaff(ctx.user.role) || !canAssignStaffRole(ctx.user.role, existing.role) || !canAssignStaffRole(ctx.user.role, input.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تعديل هذا المستخدم" });
+      }
+      const email = input.email?.trim().toLowerCase() || null;
+      if (email) {
+        const [duplicate] = await db.select({ id: staffMembers.id }).from(staffMembers).where(eq(staffMembers.email, email)).limit(1);
+        if (duplicate && duplicate.id !== input.id) throw new TRPCError({ code: "CONFLICT", message: "يوجد مستخدم آخر بهذا البريد الإلكتروني" });
+      }
+      const [account] = email
+        ? await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.email, email)).limit(1)
+        : [];
+      await db.update(staffMembers).set({
+        fullName: input.fullName,
+        email,
+        phone: input.phone || null,
+        role: input.role,
+        active: input.active ? 1 : 0,
+        userId: account?.id ?? null,
+      }).where(eq(staffMembers.id, input.id));
+      if (account && account.role === "user") {
+        await db.update(users).set({ role: input.role }).where(eq(users.id, account.id));
+      }
+      return { success: true } as const;
+    }),
+  }),
+
   clinic: router({
     getSettings: publicProcedure.query(async () => {
       const db = await getDb();
@@ -140,9 +294,9 @@ export const appRouter = router({
       const [settings] = await db.select().from(clinicSettings).limit(1);
       return settings ?? null;
     }),
-    saveSettings: roleProcedure("supervisor").input(clinicInput).mutation(async ({ input }) => {
+    saveSettings: adminProcedure.input(clinicInput).mutation(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database is not available");
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const [existing] = await db.select({ id: clinicSettings.id }).from(clinicSettings).limit(1);
       if (existing) {
         await db.update(clinicSettings).set(input).where(eq(clinicSettings.id, existing.id));
@@ -153,18 +307,76 @@ export const appRouter = router({
     }),
   }),
 
+  pricing: router({
+    get: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return { general: 35000, specialist: 50000 };
+      const [settings] = await db.select({
+        consultationGeneralPrice: clinicSettings.consultationGeneralPrice,
+        consultationSpecialistPrice: clinicSettings.consultationSpecialistPrice,
+      }).from(clinicSettings).limit(1);
+      return resolveConsultationPrices(settings);
+    }),
+    updateConsultation: roleProcedure("supervisor").input(z.object({
+      generalPrice: z.number().int().min(0).max(100000000),
+      specialistPrice: z.number().int().min(0).max(100000000),
+    })).mutation(async ({ input, ctx }) => {
+      if (!canManagePrices(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تعديل الأسعار" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [settings] = await db.select().from(clinicSettings).limit(1);
+      const current = resolveConsultationPrices(settings);
+      const next = { general: input.generalPrice, specialist: input.specialistPrice };
+      const changes = diffConsultationPrices(current, next);
+      if (settings) {
+        await db.update(clinicSettings).set({
+          consultationGeneralPrice: next.general,
+          consultationSpecialistPrice: next.specialist,
+        }).where(eq(clinicSettings.id, settings.id));
+      } else {
+        await db.insert(clinicSettings).values({
+          name: "مستوصف بكّا الطبي الحديث",
+          consultationGeneralPrice: next.general,
+          consultationSpecialistPrice: next.specialist,
+        });
+      }
+      if (changes.length) {
+        await db.insert(priceChanges).values(changes.map(change => ({ ...change, changedBy: ctx.user.id })));
+      }
+      return { ...next, changed: changes.length } as const;
+    }),
+    history: roleProcedure("supervisor").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      const rows = await db.select({
+        id: priceChanges.id,
+        entity: priceChanges.entity,
+        reference: priceChanges.reference,
+        oldPrice: priceChanges.oldPrice,
+        newPrice: priceChanges.newPrice,
+        changedBy: priceChanges.changedBy,
+        createdAt: priceChanges.createdAt,
+      }).from(priceChanges).orderBy(desc(priceChanges.createdAt)).limit(40);
+      const actorIds = [...new Set(rows.map(row => row.changedBy))];
+      const actors = actorIds.length
+        ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, actorIds))
+        : [];
+      return rows.map(row => ({ ...row, actorName: actors.find(actor => actor.id === row.changedBy)?.name ?? null }));
+    }),
+  }),
+
   patients: router({
-    list: roleProcedure("cashier", "lab", "supervisor").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
+    list: roleProcedure("cashier", "lab").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       const search = input?.search;
       return db.select().from(patients).where(search ? like(patients.name, `%${search}%`) : undefined).orderBy(desc(patients.createdAt)).limit(100);
     }),
-    workspace: roleProcedure("cashier", "lab", "supervisor").query(async () => {
+    workspace: roleProcedure("cashier", "lab").query(async () => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const patientRows = await db.select().from(patients).orderBy(desc(patients.createdAt)).limit(100);
-      if (patientRows.length === 0) return { patients: [], invoices: [], invoiceItems: [], labOrders: [], labTests: [] };
+      if (patientRows.length === 0) return { patients: [], invoices: [], invoiceItems: [], labOrders: [], labTests: [], labResults: [] };
       const patientIds = patientRows.map(patient => patient.id);
       const invoiceRows = await db.select().from(invoices).where(inArray(invoices.patientId, patientIds)).orderBy(desc(invoices.createdAt)).limit(500);
       const invoiceIds = invoiceRows.map(invoice => invoice.id);
@@ -173,12 +385,19 @@ export const appRouter = router({
         db.select().from(labOrders).where(inArray(labOrders.patientId, patientIds)).orderBy(desc(labOrders.createdAt)).limit(500),
         db.select().from(labTests).where(eq(labTests.active, 1)).orderBy(labTests.category, labTests.nameAr),
       ]);
-      return { patients: patientRows, invoices: invoiceRows, invoiceItems: itemRows, labOrders: orderRows, labTests: testRows };
+      const resultRows = orderRows.length
+        ? await db.select().from(labResults).where(inArray(labResults.labOrderId, orderRows.map(order => order.id)))
+        : [];
+      return { patients: patientRows, invoices: invoiceRows, invoiceItems: itemRows, labOrders: orderRows, labTests: testRows, labResults: resultRows };
     }),
-    register: roleProcedure("cashier", "supervisor").input(visitInput).mutation(async ({ input, ctx }) => {
+    register: roleProcedure("cashier").input(visitInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة؛ لم يتم حفظ التسجيل" });
       const codes = uniqueTestCodes(input.testCodes);
+      const consultationType = normalizeConsultationType(input.consultationType, "general");
+      if (codes.length === 0 && consultationType === "none") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "اختر معاينة طبيب أو فحصًا واحدًا على الأقل" });
+      }
 
       return db.transaction(async tx => {
         const [knownShift] = await tx.select().from(shifts)
@@ -194,6 +413,10 @@ export const appRouter = router({
           .limit(1).for("update");
         if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
         if (shift.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية مغلقة؛ افتح وردية بديلة قبل التسجيل" });
+        if (ctx.user.role === "cashier") {
+          await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: ctx.user.id, assignedBy: ctx.user.id })
+            .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
+        }
 
         const tests = codes.length
           ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)))
@@ -203,6 +426,12 @@ export const appRouter = router({
           const missing = codes.filter(code => !found.has(code));
           throw new TRPCError({ code: "BAD_REQUEST", message: `فحوصات غير موجودة أو غير مفعلة: ${missing.join(", ")}` });
         }
+
+        const [settings] = await tx.select({
+          consultationGeneralPrice: clinicSettings.consultationGeneralPrice,
+          consultationSpecialistPrice: clinicSettings.consultationSpecialistPrice,
+        }).from(clinicSettings).limit(1);
+        const consultationFee = consultationFeeFor(consultationType, resolveConsultationPrices(settings));
 
         const sequence = shift.sequenceCurrent + 1;
         const patientNumber = toPatientNumber(input.shiftDate, input.shiftType, sequence);
@@ -217,23 +446,28 @@ export const appRouter = router({
         });
         const patientId = patientResult[0].insertId;
         const invoiceNumber = toInvoiceNumber(patientNumber);
-        const invoiceLines = [
-          { quantity: 1, unitPrice: CONSULTATION_FEE },
-          ...tests.map(test => ({ quantity: 1, unitPrice: test.price })),
-        ];
-        const total = sumInvoiceItems(invoiceLines);
+        const consultationLine = consultationType === "none"
+          ? []
+          : [{ invoiceId: 0, labTestId: null, description: CONSULTATION_LABELS[consultationType], quantity: 1, unitPrice: consultationFee }];
+        const testLines = tests.map(test => ({
+          invoiceId: 0,
+          labTestId: test.id,
+          description: describeLabTest(test.code, test.nameAr),
+          quantity: 1,
+          unitPrice: test.price,
+        }));
+        const total = sumInvoiceItems([...consultationLine, ...testLines]);
         const invoiceResult = await tx.insert(invoices).values({
           invoiceNumber,
           patientId,
           shiftId: shift.id,
           total,
+          consultationType,
+          consultationFee,
           createdBy: ctx.user.id,
         });
         const invoiceId = invoiceResult[0].insertId;
-        await tx.insert(invoiceItems).values([
-          { invoiceId, description: "المعاينة الطبية", quantity: 1, unitPrice: CONSULTATION_FEE },
-          ...tests.map(test => ({ invoiceId, labTestId: test.id, description: `${test.code} · ${test.nameAr}`, quantity: 1, unitPrice: test.price })),
-        ]);
+        await tx.insert(invoiceItems).values([...consultationLine, ...testLines].map(line => ({ ...line, invoiceId })));
         if (tests.length) {
           await tx.insert(labOrders).values(tests.map(test => ({
             orderNumber: `ORD-${patientNumber.replaceAll("-", "")}-${test.id}-${String(sequence).padStart(2, "0")}`,
@@ -243,13 +477,28 @@ export const appRouter = router({
             status: "blocked" as const,
           })));
         }
-        return { id: patientId, patientNumber, sequence, shiftId: shift.id, invoiceId, invoiceNumber, total, testCodes: codes };
+        return {
+          id: patientId,
+          patientNumber,
+          sequence,
+          shiftId: shift.id,
+          invoiceId,
+          invoiceNumber,
+          total,
+          consultationType,
+          consultationFee,
+          testCodes: codes,
+        };
       });
     }),
-    addTests: roleProcedure("cashier", "supervisor").input(followUpInput).mutation(async ({ input, ctx }) => {
+    addTests: roleProcedure("cashier").input(followUpInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة؛ لم يتم حفظ الفحوصات" });
       const codes = uniqueTestCodes(input.testCodes);
+      const consultationType = normalizeConsultationType(input.consultationType, "none");
+      if (codes.length === 0 && consultationType === "none") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "اختر فحصًا واحدًا على الأقل" });
+      }
 
       return db.transaction(async tx => {
         const [patient] = await tx.select().from(patients).where(eq(patients.patientNumber, input.patientNumber)).limit(1).for("update");
@@ -266,37 +515,50 @@ export const appRouter = router({
           .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
           .limit(1).for("update");
         if (!shift || shift.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية المطلوبة غير مفتوحة" });
-        const tests = await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)));
+        if (ctx.user.role === "cashier") {
+          await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: ctx.user.id, assignedBy: ctx.user.id })
+            .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
+        }
+        const tests = codes.length
+          ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)))
+          : [];
         if (tests.length !== codes.length) {
           const found = new Set(tests.map(test => test.code));
           throw new TRPCError({ code: "BAD_REQUEST", message: `فحوصات غير موجودة أو غير مفعلة: ${codes.filter(code => !found.has(code)).join(", ")}` });
         }
+        const [settings] = await tx.select({
+          consultationGeneralPrice: clinicSettings.consultationGeneralPrice,
+          consultationSpecialistPrice: clinicSettings.consultationSpecialistPrice,
+        }).from(clinicSettings).limit(1);
+        const consultationFee = consultationFeeFor(consultationType, resolveConsultationPrices(settings));
         const [countRow] = await tx.select({ count: sql<number>`count(*)` }).from(invoices).where(eq(invoices.patientId, patient.id));
         const invoiceNumber = toInvoiceNumber(patient.patientNumber, Number(countRow?.count ?? 0) + 1);
-        const total = sumInvoiceItems(tests.map(test => ({ quantity: 1, unitPrice: test.price })));
+        const lines = [
+          ...(consultationType === "none" ? [] : [{ invoiceId: 0, labTestId: null, description: CONSULTATION_LABELS[consultationType], quantity: 1, unitPrice: consultationFee }]),
+          ...tests.map(test => ({ invoiceId: 0, labTestId: test.id, description: describeLabTest(test.code, test.nameAr), quantity: 1, unitPrice: test.price })),
+        ];
+        const total = sumInvoiceItems(lines);
         const invoiceResult = await tx.insert(invoices).values({
           invoiceNumber,
           patientId: patient.id,
           shiftId: shift.id,
           total,
+          consultationType,
+          consultationFee,
           createdBy: ctx.user.id,
         });
         const invoiceId = invoiceResult[0].insertId;
-        await tx.insert(invoiceItems).values(tests.map(test => ({
-          invoiceId,
-          labTestId: test.id,
-          description: `${test.code} · ${test.nameAr}`,
-          quantity: 1,
-          unitPrice: test.price,
-        })));
-        await tx.insert(labOrders).values(tests.map(test => ({
-          orderNumber: `ORD-${patient.patientNumber.replaceAll("-", "")}-${test.id}-${invoiceId}`,
-          patientId: patient.id,
-          invoiceId,
-          labTestId: test.id,
-          status: "blocked" as const,
-        })));
-        return { patientId: patient.id, patientNumber: patient.patientNumber, invoiceId, invoiceNumber, total, testCodes: codes };
+        await tx.insert(invoiceItems).values(lines.map(line => ({ ...line, invoiceId })));
+        if (tests.length) {
+          await tx.insert(labOrders).values(tests.map(test => ({
+            orderNumber: `ORD-${patient.patientNumber.replaceAll("-", "")}-${test.id}-${invoiceId}`,
+            patientId: patient.id,
+            invoiceId,
+            labTestId: test.id,
+            status: "blocked" as const,
+          })));
+        }
+        return { patientId: patient.id, patientNumber: patient.patientNumber, invoiceId, invoiceNumber, total, consultationType, consultationFee, testCodes: codes };
       });
     }),
   }),
@@ -315,7 +577,7 @@ export const appRouter = router({
     }),
     assignUsers: adminProcedure.input(z.object({
       shiftDate: clinicDate,
-      shiftType: z.enum(["morning", "evening", "night"]),
+      shiftType: shiftTypeInput,
       cashierUserId: z.number().int().positive().nullable(),
       labUserId: z.number().int().positive().nullable(),
     })).mutation(async ({ input }) => {
@@ -352,7 +614,7 @@ export const appRouter = router({
     }),
     assignStaff: adminProcedure.input(z.object({
       shiftDate: clinicDate,
-      shiftType: z.enum(["morning", "evening", "night"]),
+      shiftType: shiftTypeInput,
       userIds: z.array(z.number().int().positive()).max(100),
     })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -379,9 +641,9 @@ export const appRouter = router({
         .innerJoin(shifts, eq(userShiftAssignments.shiftId, shifts.id))
         .where(and(eq(userShiftAssignments.userId, ctx.user.id), eq(shifts.shiftDate, input.shiftDate)));
     }),
-    close: roleProcedure("admin", "supervisor").input(z.object({
+    close: roleProcedure("supervisor").input(z.object({
       shiftDate: clinicDate,
-      shiftType: z.enum(["morning", "evening", "night"]),
+      shiftType: shiftTypeInput,
     })).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
@@ -396,15 +658,15 @@ export const appRouter = router({
         return closed;
       });
     }),
-    current: protectedProcedure.input(z.object({ shiftDate: z.string(), shiftType: z.enum(["morning", "evening", "night"]) })).query(async ({ input }) => {
+    current: protectedProcedure.input(z.object({ shiftDate: z.string(), shiftType: shiftTypeInput })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return null;
       const [shift] = await db.select().from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).orderBy(desc(shifts.id)).limit(1);
       return shift ?? null;
     }),
-    open: roleProcedure("cashier", "supervisor").input(z.object({ shiftDate: z.string(), shiftType: z.enum(["morning", "evening", "night"]) })).mutation(async ({ input, ctx }) => {
+    open: roleProcedure("cashier").input(z.object({ shiftDate: z.string(), shiftType: shiftTypeInput })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database is not available");
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
         const [existing] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
           .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
@@ -423,19 +685,34 @@ export const appRouter = router({
   }),
 
   billing: router({
-    recent: protectedProcedure.query(async () => {
+    recent: roleProcedure("cashier").query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(invoices).orderBy(desc(invoices.createdAt)).limit(100);
     }),
-    markPaid: roleProcedure("cashier", "supervisor").input(z.object({ invoiceId: z.number().int().positive(), paymentMethod: z.string().max(40).default("cash") })).mutation(async ({ input }) => {
+    detail: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive() })).query(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database is not available");
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [invoice] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1);
+      if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+      const [patient] = await db.select().from(patients).where(eq(patients.id, invoice.patientId)).limit(1);
+      const [items, orders] = await Promise.all([
+        db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id)),
+        db.select().from(labOrders).where(eq(labOrders.invoiceId, invoice.id)),
+      ]);
+      const testIds = [...new Set([...items.map(item => item.labTestId), ...orders.map(order => order.labTestId)].filter((id): id is number => id != null))];
+      const tests = testIds.length ? await db.select().from(labTests).where(inArray(labTests.id, testIds)) : [];
+      return { invoice, patient: patient ?? null, items, orders, tests };
+    }),
+    markPaid: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive(), paymentMethod: z.string().max(40).default("cash") })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
         const [invoice] = await tx.select({ id: invoices.id, status: invoices.status }).from(invoices)
           .where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
         if (invoice.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة ملغاة" });
+        if (invoice.status === "refunded") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة مسترجعة" });
         if (invoice.status === "paid") return { success: true, alreadyPaid: true } as const;
         await tx.update(invoices).set({ status: "paid", paymentMethod: input.paymentMethod, paidAt: new Date() }).where(eq(invoices.id, input.invoiceId));
         await tx.update(labOrders).set({ status: "queued" })
@@ -443,7 +720,7 @@ export const appRouter = router({
         return { success: true, alreadyPaid: false } as const;
       });
     }),
-    cancel: roleProcedure("admin", "cashier").input(invoiceActionInput).mutation(async ({ input, ctx }) => {
+    cancel: roleProcedure("cashier").input(invoiceActionInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
@@ -457,7 +734,7 @@ export const appRouter = router({
         return updated;
       });
     }),
-    refund: roleProcedure("admin", "cashier").input(invoiceActionInput).mutation(async ({ input, ctx }) => {
+    refund: roleProcedure("cashier").input(invoiceActionInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
@@ -471,50 +748,44 @@ export const appRouter = router({
         return updated;
       });
     }),
-    updateTests: roleProcedure("admin", "cashier").input(invoiceTestsUpdateInput).mutation(async ({ input, ctx }) => {
+    updateInvoice: roleProcedure("cashier").input(invoiceEditInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
-      const codes = uniqueTestCodes(input.testCodes);
       return db.transaction(async tx => {
         const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
-        if (!invoice || invoice.status === "cancelled" || invoice.status === "refunded") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل هذه الفاتورة" });
-        const tests = codes.length ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1))) : [];
-        if (tests.length !== codes.length) throw new TRPCError({ code: "BAD_REQUEST", message: "يوجد فحص غير موجود أو غير مفعل" });
-        const currentOrders = await tx.select().from(labOrders).where(eq(labOrders.invoiceId, invoice.id));
-        const completedCodes = new Set(currentOrders.filter(order => order.status === "completed").map(order => order.labTestId));
-        const removedIds = currentOrders.filter(order => !tests.some(test => test.id === order.labTestId)).map(order => order.labTestId);
-        if (removedIds.some(id => completedCodes.has(id))) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن حذف فحص صدرت نتيجته" });
-        const oldTotal = invoice.total;
-        const newTotal = CONSULTATION_FEE + tests.reduce((sum, test) => sum + test.price, 0);
-        await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id));
-        await tx.insert(invoiceItems).values([{ invoiceId: invoice.id, description: "المعاينة الطبية", quantity: 1, unitPrice: CONSULTATION_FEE }, ...tests.map(test => ({ invoiceId: invoice.id, labTestId: test.id, description: `${test.code} · ${test.nameAr}`, quantity: 1, unitPrice: test.price }))]);
-        for (const order of currentOrders) if (!tests.some(test => test.id === order.labTestId)) await tx.delete(labOrders).where(eq(labOrders.id, order.id));
-        const currentIds = new Set(currentOrders.map(order => order.labTestId));
-        const newTests = tests.filter(test => !currentIds.has(test.id));
-        if (newTests.length) await tx.insert(labOrders).values(newTests.map(test => ({ orderNumber: `ORD-${invoice.invoiceNumber.replaceAll("-", "")}-${test.id}-${Date.now()}`, patientId: invoice.patientId, invoiceId: invoice.id, labTestId: test.id, status: invoice.status === "paid" && newTotal === oldTotal ? "queued" as const : "blocked" as const })));
-        const nextStatus = invoice.status === "paid" && newTotal === oldTotal ? "paid" as const : "pending" as const;
-        if (nextStatus === "pending") await tx.update(labOrders).set({ status: "blocked" }).where(eq(labOrders.invoiceId, invoice.id));
-        await tx.update(invoices).set({ total: newTotal, status: nextStatus }).where(eq(invoices.id, invoice.id));
-        await tx.insert(invoiceAdjustments).values({ invoiceId: invoice.id, type: "edit", amountBefore: oldTotal, amountAfter: newTotal, delta: newTotal - oldTotal, reason: input.reason, metadataJson: JSON.stringify({ testCodes: codes }), createdBy: ctx.user.id });
-        const [updated] = await tx.select().from(invoices).where(eq(invoices.id, invoice.id)).limit(1);
-        return { invoice: updated, requiresRecollection: nextStatus === "pending", delta: newTotal - oldTotal };
+        if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+        if (invoice.status === "cancelled" || invoice.status === "refunded") {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل هذه الفاتورة" });
+        }
+        return applyInvoiceEdit(tx, invoice, input, ctx.user.id);
       });
     }),
   }),
 
   laboratory: router({
-    pending: roleProcedure("lab", "supervisor").query(async () => {
+    pending: roleProcedure("lab").query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(labOrders).where(eq(labOrders.status, "queued")).orderBy(desc(labOrders.createdAt)).limit(100);
     }),
-    saveResult: roleProcedure("lab", "supervisor").input(resultInput).mutation(async ({ input, ctx }) => {
+    collectSample: roleProcedure("lab").input(z.object({ labOrderId: z.number().int().positive() })).mutation(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database is not available");
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const [order] = await db.select().from(labOrders).where(eq(labOrders.id, input.labOrderId)).limit(1);
-      if (!order) throw new Error("Lab order not found");
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "طلب المختبر غير موجود" });
       const [invoice] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, order.invoiceId)).limit(1);
-      if (!invoice || invoice.status !== "paid") throw new Error("لا يمكن إصدار النتيجة قبل اكتمال الدفع");
+      if (!invoice || invoice.status !== "paid") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن سحب العينة قبل اكتمال الدفع" });
+      if (order.status === "completed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "صدرت نتيجة هذا الفحص بالفعل" });
+      await db.update(labOrders).set({ status: "in_progress", collectedAt: order.collectedAt ?? new Date() }).where(eq(labOrders.id, order.id));
+      return { success: true } as const;
+    }),
+    saveResult: roleProcedure("lab").input(resultInput).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [order] = await db.select().from(labOrders).where(eq(labOrders.id, input.labOrderId)).limit(1);
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "طلب المختبر غير موجود" });
+      const [invoice] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, order.invoiceId)).limit(1);
+      if (!invoice || invoice.status !== "paid") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن إصدار النتيجة قبل اكتمال الدفع" });
       const [existing] = await db.select({ id: labResults.id }).from(labResults).where(eq(labResults.labOrderId, input.labOrderId)).limit(1);
       const valuesJson = JSON.stringify(input.values);
       if (existing) {
@@ -522,36 +793,86 @@ export const appRouter = router({
       } else {
         await db.insert(labResults).values({ labOrderId: input.labOrderId, valuesJson, remarks: input.remarks, technicianUserId: ctx.user.id });
       }
-      await db.update(labOrders).set({ status: "completed", resultIssuedAt: new Date() }).where(eq(labOrders.id, input.labOrderId));
+      await db.update(labOrders).set({ status: "completed", resultIssuedAt: new Date(), collectedAt: order.collectedAt ?? new Date() }).where(eq(labOrders.id, input.labOrderId));
       return { success: true } as const;
     }),
   }),
 
   reports: router({
-    summary: roleProcedure("admin", "supervisor").input(z.object({ period: z.enum(["daily", "monthly"]), date: clinicDate })).query(async ({ input }) => {
+    summary: roleProcedure("supervisor").input(z.object({
+      period: z.enum(["daily", "weekly", "monthly"]),
+      date: clinicDate,
+    })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const window = getReportWindow(input.period, input.date);
-      const rows = await db.select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, total: invoices.total, status: invoices.status, createdAt: invoices.createdAt, paidAt: invoices.paidAt, patientNumber: patients.patientNumber })
-        .from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
-        .where(and(gte(invoices.createdAt, window.start), lt(invoices.createdAt, window.end))).orderBy(desc(invoices.createdAt));
-      const paidRows = rows.filter(row => row.status === "paid" && row.paidAt && row.paidAt >= window.start && row.paidAt < window.end);
-      const refundRows = rows.filter(row => row.status === "refunded");
-      return { period: input.period, date: input.date, issuedCount: rows.filter(row => row.status !== "cancelled").length, paidCount: paidRows.length, cancelledCount: rows.filter(row => row.status === "cancelled").length, refundedCount: refundRows.length, grossTotal: paidRows.reduce((sum, row) => sum + row.total, 0), refundTotal: refundRows.reduce((sum, row) => sum + row.total, 0), netTotal: paidRows.reduce((sum, row) => sum + row.total, 0) - refundRows.reduce((sum, row) => sum + row.total, 0), rows };
+      const [issuedRows, collectedRows] = await Promise.all([
+        db.select({
+          invoiceNumber: invoices.invoiceNumber,
+          patientNumber: patients.patientNumber,
+          createdAt: invoices.createdAt,
+          paidAt: invoices.paidAt,
+          total: invoices.total,
+          status: invoices.status,
+          paymentMethod: invoices.paymentMethod,
+          consultationType: invoices.consultationType,
+          consultationFee: invoices.consultationFee,
+        }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
+          .where(and(gte(invoices.createdAt, window.start), lt(invoices.createdAt, window.end)))
+          .orderBy(desc(invoices.createdAt)),
+        db.select({
+          invoiceNumber: invoices.invoiceNumber,
+          patientNumber: patients.patientNumber,
+          createdAt: invoices.createdAt,
+          paidAt: invoices.paidAt,
+          refundedAt: invoices.refundedAt,
+          total: invoices.total,
+          status: invoices.status,
+          paymentMethod: invoices.paymentMethod,
+          consultationType: invoices.consultationType,
+          consultationFee: invoices.consultationFee,
+        }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
+          .where(or(
+            and(eq(invoices.status, "paid"), gte(invoices.paidAt, window.start), lt(invoices.paidAt, window.end)),
+            and(eq(invoices.status, "refunded"), gte(invoices.refundedAt, window.start), lt(invoices.refundedAt, window.end)),
+          ))
+          .orderBy(desc(invoices.paidAt)),
+      ]);
+      return buildOperationalReport(window, issuedRows, collectedRows);
     }),
-    shift: roleProcedure("admin", "supervisor", "cashier").input(z.object({ shiftDate: clinicDate, shiftType: z.enum(["morning", "evening", "night"]) })).query(async ({ input, ctx }) => {
+    shift: roleProcedure("cashier", "supervisor").input(z.object({
+      shiftDate: clinicDate,
+      shiftType: shiftTypeInput,
+    })).query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
-      const [shift] = await db.select().from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
-      if (!shift) return { shift: null, invoiceCount: 0, paidCount: 0, grossTotal: 0, refundTotal: 0, netTotal: 0, rows: [] };
+      const window = getShiftWindow(input.shiftDate, input.shiftType);
+      const [shift] = await db.select().from(shifts)
+        .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
+        .limit(1);
+      if (!shift) return { shift: null, report: buildOperationalReport(window, [], []) };
       if (ctx.user.role === "cashier") {
-        const [assigned] = await db.select({ id: userShiftAssignments.id }).from(userShiftAssignments).where(and(eq(userShiftAssignments.shiftId, shift.id), eq(userShiftAssignments.userId, ctx.user.id))).limit(1);
-        if (!assigned && shift.cashierUserId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك مشاهدة تقرير وردية غير مسندة إليك" });
+        const [assigned] = await db.select({ id: userShiftAssignments.id }).from(userShiftAssignments)
+          .where(and(eq(userShiftAssignments.shiftId, shift.id), eq(userShiftAssignments.userId, ctx.user.id))).limit(1);
+        if (!assigned && shift.cashierUserId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك مشاهدة تقرير وردية غير مسندة إليك" });
+        }
       }
-      const rows = await db.select({ invoiceNumber: invoices.invoiceNumber, total: invoices.total, status: invoices.status, patientNumber: patients.patientNumber, createdAt: invoices.createdAt, paidAt: invoices.paidAt }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id)).where(eq(invoices.shiftId, shift.id)).orderBy(desc(invoices.createdAt));
-      const paidRows = rows.filter(row => row.status === "paid");
-      const refundRows = rows.filter(row => row.status === "refunded");
-      return { shift, invoiceCount: rows.length, paidCount: paidRows.length, grossTotal: paidRows.reduce((sum, row) => sum + row.total, 0), refundTotal: refundRows.reduce((sum, row) => sum + row.total, 0), netTotal: paidRows.reduce((sum, row) => sum + row.total, 0) - refundRows.reduce((sum, row) => sum + row.total, 0), rows };
+      const rows = await db.select({
+        invoiceNumber: invoices.invoiceNumber,
+        patientNumber: patients.patientNumber,
+        createdAt: invoices.createdAt,
+        paidAt: invoices.paidAt,
+        refundedAt: invoices.refundedAt,
+        total: invoices.total,
+        status: invoices.status,
+        paymentMethod: invoices.paymentMethod,
+        consultationType: invoices.consultationType,
+        consultationFee: invoices.consultationFee,
+      }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
+        .where(eq(invoices.shiftId, shift.id))
+        .orderBy(desc(invoices.createdAt));
+      return { shift, report: buildOperationalReport(window, rows, rows) };
     }),
   }),
 
@@ -561,18 +882,178 @@ export const appRouter = router({
       if (!db) return [];
       return db.select().from(labTests).where(eq(labTests.active, 1)).orderBy(labTests.category, labTests.nameAr);
     }),
-    save: roleProcedure("admin", "supervisor").input(labTestInput).mutation(async ({ input }) => {
+    save: adminProcedure.input(labTestInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
-      const [existing] = await db.select({ id: labTests.id }).from(labTests).where(eq(labTests.code, input.code)).limit(1);
+      const [existing] = await db.select({ id: labTests.id, price: labTests.price }).from(labTests).where(eq(labTests.code, input.code)).limit(1);
       if (existing) {
         await db.update(labTests).set(input).where(eq(labTests.id, existing.id));
+        if (existing.price !== input.price) {
+          await db.insert(priceChanges).values({ entity: "lab_test", reference: input.code, oldPrice: existing.price, newPrice: input.price, changedBy: ctx.user.id });
+        }
         return { id: existing.id, created: false } as const;
       }
       const result = await db.insert(labTests).values(input);
       return { id: result[0].insertId, created: true } as const;
     }),
+    updatePrices: roleProcedure("supervisor").input(z.object({
+      items: z.array(z.object({
+        code: z.string().trim().min(1).max(32),
+        price: z.number().int().min(0).max(100000000),
+      })).min(1).max(200),
+    })).mutation(async ({ input, ctx }) => {
+      if (!canManagePrices(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تعديل الأسعار" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      return db.transaction(async tx => {
+        const codes = [...new Set(input.items.map(item => item.code))];
+        const rows = await tx.select({ id: labTests.id, code: labTests.code, price: labTests.price })
+          .from(labTests).where(inArray(labTests.code, codes));
+        if (rows.length !== codes.length) {
+          const found = new Set(rows.map(row => row.code));
+          throw new TRPCError({ code: "BAD_REQUEST", message: `فحوصات غير موجودة: ${codes.filter(code => !found.has(code)).join(", ")}` });
+        }
+        const current = new Map(rows.map(row => [row.code, row.price] as const));
+        const normalized = input.items.map(item => ({ code: item.code, price: normalizePrice(item.price) ?? 0 }));
+        const changes = diffCatalogPrices(current, normalized);
+        for (const change of changes) {
+          await tx.update(labTests).set({ price: change.newPrice }).where(eq(labTests.code, change.reference));
+        }
+        if (changes.length) {
+          await tx.insert(priceChanges).values(changes.map(change => ({ ...change, changedBy: ctx.user.id })));
+        }
+        return { updated: changes.length, unchanged: codes.length - changes.length } as const;
+      });
+    }),
   }),
 });
+
+/**
+ * Applies an invoice edit by diffing the requested tests against the stored
+ * lines. Existing lines (and their historical prices) are preserved, so adding
+ * a test never drops the tests that were already on the invoice.
+ */
+async function applyInvoiceEdit(
+  tx: any,
+  invoice: typeof invoices.$inferSelect,
+  input: { testCodes: string[]; consultationType: ConsultationType; reason: string },
+  userId: number,
+): Promise<InvoiceEditResult> {
+  const codes = uniqueTestCodes(input.testCodes);
+  const tests = codes.length
+    ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)))
+    : [];
+  if (tests.length !== codes.length) {
+    const found = new Set(tests.map((test: typeof labTests.$inferSelect) => test.code));
+    throw new TRPCError({ code: "BAD_REQUEST", message: `فحوصات غير موجودة أو غير مفعلة: ${codes.filter(code => !found.has(code)).join(", ")}` });
+  }
+  const [items, orders, settingsRows] = await Promise.all([
+    tx.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id)),
+    tx.select().from(labOrders).where(eq(labOrders.invoiceId, invoice.id)),
+    tx.select({
+      consultationGeneralPrice: clinicSettings.consultationGeneralPrice,
+      consultationSpecialistPrice: clinicSettings.consultationSpecialistPrice,
+    }).from(clinicSettings).limit(1),
+  ]);
+  const nextTestIds = new Set<number>(tests.map((test: typeof labTests.$inferSelect) => test.id));
+  const currentTestIds = new Set<number>(items.filter((item: typeof invoiceItems.$inferSelect) => item.labTestId != null).map((item: typeof invoiceItems.$inferSelect) => item.labTestId as number));
+  const removedIds = [...currentTestIds].filter(id => !nextTestIds.has(id));
+  const addedTests = tests.filter((test: typeof labTests.$inferSelect) => !currentTestIds.has(test.id));
+  const completedIds = new Set<number>(orders.filter((order: typeof labOrders.$inferSelect) => order.status === "completed").map((order: typeof labOrders.$inferSelect) => order.labTestId));
+  if (removedIds.some(id => completedIds.has(id))) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن حذف فحص صدرت نتيجته" });
+  }
+
+  const legacyConsultation = items.find((item: typeof invoiceItems.$inferSelect) => item.labTestId == null && isConsultationDescription(item.description));
+  const currentConsultation: ConsultationType = isConsultationType(invoice.consultationType) && invoice.consultationType !== "none"
+    ? invoice.consultationType
+    : legacyConsultation ? consultationTypeFromDescription(legacyConsultation.description) : "none";
+  const currentFee = invoice.consultationFee > 0 ? invoice.consultationFee : legacyConsultation?.unitPrice ?? 0;
+  const prices = resolveConsultationPrices(settingsRows[0]);
+  const nextFee = input.consultationType === "none"
+    ? 0
+    : input.consultationType === currentConsultation && currentFee > 0
+      ? currentFee
+      : consultationFeeFor(input.consultationType, prices);
+
+  const nextLines: Array<{ labTestId: number | null; description: string; quantity: number; unitPrice: number }> = [];
+  if (input.consultationType !== "none") {
+    nextLines.push({ labTestId: null, description: CONSULTATION_LABELS[input.consultationType], quantity: 1, unitPrice: nextFee });
+  }
+  for (const item of items as Array<typeof invoiceItems.$inferSelect>) {
+    if (item.labTestId != null) {
+      if (nextTestIds.has(item.labTestId)) {
+        nextLines.push({ labTestId: item.labTestId, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice });
+      }
+    } else if (!isConsultationDescription(item.description)) {
+      // Preserve any other manual service line instead of silently deleting it.
+      nextLines.push({ labTestId: null, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice });
+    }
+  }
+  for (const test of addedTests as Array<typeof labTests.$inferSelect>) {
+    nextLines.push({ labTestId: test.id, description: describeLabTest(test.code, test.nameAr), quantity: 1, unitPrice: test.price });
+  }
+
+  const total = invoiceTotal(nextLines);
+  const totalChanged = total !== invoice.total;
+  const nextStatus = invoice.status === "paid" && totalChanged ? "pending" as const : invoice.status;
+
+  await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id));
+  if (nextLines.length) {
+    await tx.insert(invoiceItems).values(nextLines.map(line => ({ ...line, invoiceId: invoice.id })));
+  }
+  for (const removedId of removedIds) {
+    await tx.delete(labOrders).where(and(eq(labOrders.invoiceId, invoice.id), eq(labOrders.labTestId, removedId)));
+  }
+  if (addedTests.length) {
+    await tx.insert(labOrders).values(addedTests.map((test: typeof labTests.$inferSelect) => ({
+      orderNumber: `ORD-${invoice.invoiceNumber.replaceAll("-", "")}-${test.id}-${Date.now()}`,
+      patientId: invoice.patientId,
+      invoiceId: invoice.id,
+      labTestId: test.id,
+      status: nextStatus === "paid" ? "queued" as const : "blocked" as const,
+    })));
+  }
+  if (nextStatus === "pending") {
+    await tx.update(labOrders).set({ status: "blocked" }).where(eq(labOrders.invoiceId, invoice.id));
+  }
+  await tx.update(invoices).set({
+    total,
+    status: nextStatus,
+    consultationType: input.consultationType,
+    consultationFee: nextFee,
+  }).where(eq(invoices.id, invoice.id));
+
+  const adjustmentType = removedIds.length > 0 && addedTests.length === 0
+    ? "remove_test" as const
+    : addedTests.length > 0 && removedIds.length === 0
+      ? "add_test" as const
+      : "edit" as const;
+  await tx.insert(invoiceAdjustments).values({
+    invoiceId: invoice.id,
+    type: adjustmentType,
+    amountBefore: invoice.total,
+    amountAfter: total,
+    delta: total - invoice.total,
+    reason: input.reason,
+    metadataJson: JSON.stringify({
+      addedTests: addedTests.map((test: typeof labTests.$inferSelect) => test.code),
+      removedTestIds: removedIds,
+      consultationFrom: currentConsultation,
+      consultationTo: input.consultationType,
+      consultationFee: nextFee,
+    }),
+    createdBy: userId,
+  });
+  const [updated] = await tx.select().from(invoices).where(eq(invoices.id, invoice.id)).limit(1);
+  return {
+    invoice: updated,
+    added: addedTests.map((test: typeof labTests.$inferSelect) => test.code),
+    removed: removedIds.map(String),
+    consultationType: input.consultationType,
+    requiresRecollection: nextStatus === "pending",
+    delta: total - invoice.total,
+  };
+}
 
 export type AppRouter = typeof appRouter;

@@ -29,8 +29,12 @@ describe("operational report periods in Africa/Khartoum", () => {
     expect(window.dateKey).toBe("2026-12-17");
   });
 
-  it("rejects malformed periods and impossible dates", () => {
-    expect(() => getReportWindow("weekly", "2026-11-21")).toThrow("غير صالح");
+  it("spans the Sudanese week and rejects malformed periods and impossible dates", () => {
+    const week = getReportWindow("weekly", "2026-11-21");
+    expect(week.period).toBe("weekly");
+    expect(week.start.toISOString()).toBe("2026-11-14T22:00:00.000Z");
+    expect(week.end.toISOString()).toBe("2026-11-21T22:00:00.000Z");
+    expect(() => getReportWindow("yearly", "2026-11-21")).toThrow("غير صالح");
     expect(() => getReportWindow("daily", "2026-02-30")).toThrow("غير صالح");
     expect(() => getReportWindow("daily", ["2026-11-21"])).toThrow("غير صالح");
   });

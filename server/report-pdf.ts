@@ -1,20 +1,22 @@
 import PDFDocument from "pdfkit";
 import path from "node:path";
-import { CLINIC_TIME_ZONE, OperationalReport, ReportInvoiceRow, formatReportPeriod } from "./operational-reports";
+import { CLINIC_TIME_ZONE, OperationalReport, ReportInvoiceRow, formatReportPeriod, reportPeriodTitle } from "./operational-reports";
+import { renderOperationalReportHtmlPdf } from "./report-html";
 
 const FONT_PATH = path.resolve(process.cwd(), "server/assets/fonts/Amiri-Regular.ttf");
 const PAGE_WIDTH = 595.28;
 const LEFT = 42;
 const CONTENT_WIDTH = PAGE_WIDTH - LEFT * 2;
 const TABLE_COLUMNS = [
-  { label: "رقم الفاتورة", width: 123, key: "invoice" },
-  { label: "رقم الملف", width: 100, key: "patient" },
-  { label: "الوقت", width: 105, key: "time" },
-  { label: "الحالة / الطريقة", width: 112, key: "state" },
-  { label: "المبلغ", width: 71, key: "total" },
+  { label: "رقم الفاتورة", width: 118, key: "invoice" },
+  { label: "رقم الملف", width: 96, key: "patient" },
+  { label: "الخدمة", width: 88, key: "service" },
+  { label: "الوقت", width: 92, key: "time" },
+  { label: "الحالة / الطريقة", width: 95, key: "state" },
+  { label: "المبلغ", width: 62, key: "total" },
 ] as const;
 
-type TableEntry = { invoice: string; patient: string; time: string; state: string; total: string };
+type TableEntry = { invoice: string; patient: string; service: string; time: string; state: string; total: string };
 
 function safeText(value: string | null | undefined, maxLength = 120): string {
   return (value ?? "—").replace(/[\r\n\0\u2028\u2029]/g, " ").trim().slice(0, maxLength) || "—";
@@ -33,6 +35,13 @@ function formatTime(date: Date): string {
   }).format(date);
 }
 
+function consultationLabel(row: ReportInvoiceRow): string {
+  const type = row.consultationType ?? ((row.consultationFee ?? 0) > 0 ? "general" : "none");
+  if (type === "specialist") return "معاينة اختصاصي";
+  if (type === "general") return "معاينة عمومي";
+  return "فحوصات";
+}
+
 function tableEntry(row: ReportInvoiceRow, collected: boolean): TableEntry {
   const status = collected
     ? safeText(row.paymentMethod ?? "مدفوع", 30)
@@ -44,13 +53,14 @@ function tableEntry(row: ReportInvoiceRow, collected: boolean): TableEntry {
   return {
     invoice: safeText(row.invoiceNumber, 40),
     patient: safeText(row.patientNumber, 32),
+    service: consultationLabel(row),
     time: formatTime(collected ? row.paidAt ?? row.createdAt : row.createdAt),
     state: status,
     total: formatMoney(row.total),
   };
 }
 
-export async function renderOperationalReportPdf(report: OperationalReport, clinicName: string, branding: { clinicAddress?: string | null; clinicPhone?: string | null; clinicWebsite?: string | null; clinicFooterText?: string | null } = {}): Promise<Buffer> {
+export async function renderOperationalReportPdfWithPdfKit(report: OperationalReport, clinicName: string, branding: { clinicAddress?: string | null; clinicPhone?: string | null; clinicWebsite?: string | null; clinicFooterText?: string | null } = {}): Promise<Buffer> {
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 38, right: LEFT, bottom: 42, left: LEFT },
@@ -73,7 +83,7 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
     doc.font("Amiri").fillColor("#132f37").fontSize(17)
       .text(safeText(clinicName, 180), LEFT, 38, { width: CONTENT_WIDTH, align: "right" });
     doc.fillColor("#1a7a75").fontSize(14)
-      .text(report.period === "daily" ? "تقرير حركة المستوصف اليومي" : "تقرير حركة المستوصف الشهري", LEFT, 67, { width: CONTENT_WIDTH, align: "right" });
+      .text(reportPeriodTitle(report), LEFT, 67, { width: CONTENT_WIDTH, align: "right" });
     doc.fillColor("#536970").fontSize(10)
       .text(`الفترة: ${formatReportPeriod(report)} · المنطقة الزمنية: الخرطوم`, LEFT, 91, { width: CONTENT_WIDTH, align: "right" });
     const contact = [branding.clinicAddress, branding.clinicPhone, branding.clinicWebsite].filter(Boolean).map(value => safeText(value, 120)).join(" · ");
@@ -83,28 +93,46 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
 
   drawPageHeader();
   let y = 126;
-  const summaryCards = [
+
+  const drawCards = (cards: Array<{ label: string; value: string }>) => {
+    const cardGap = 7;
+    const cardWidth = (CONTENT_WIDTH - cardGap * (cards.length - 1)) / cards.length;
+    cards.forEach((card, index) => {
+      const x = LEFT + index * (cardWidth + cardGap);
+      doc.roundedRect(x, y, cardWidth, 48, 5).fill("#f1f7f6");
+      doc.font("Amiri").fillColor("#597078").fontSize(8.5)
+        .text(card.label, x + 3, y + 6, { width: cardWidth - 6, align: "center" });
+      doc.fillColor("#123a42").fontSize(10)
+        .text(card.value, x + 3, y + 25, { width: cardWidth - 6, align: "center", lineBreak: false });
+    });
+    y += 56;
+  };
+
+  drawCards([
     { label: "الفواتير المنشأة", value: String(report.issuedCount) },
     { label: "قيمة الفواتير", value: formatMoney(report.issuedTotal) },
     { label: "عدد التحصيلات", value: String(report.collectedCount) },
     { label: "إجمالي التحصيل", value: formatMoney(report.collectedTotal) },
+  ]);
+  drawCards([
     { label: "الاسترجاعات", value: formatMoney(report.refundedTotal) },
     { label: "الصافي", value: formatMoney(report.netTotal) },
-  ];
-  const cardGap = 8;
-  const cardWidth = (CONTENT_WIDTH - cardGap * (summaryCards.length - 1)) / summaryCards.length;
-  summaryCards.forEach((card, index) => {
-    const x = LEFT + index * (cardWidth + cardGap);
-    doc.roundedRect(x, y, cardWidth, 52, 5).fill("#f1f7f6");
-    doc.font("Amiri").fillColor("#597078").fontSize(9)
-      .text(card.label, x + 4, y + 7, { width: cardWidth - 8, align: "center" });
-    doc.fillColor("#123a42").fontSize(10)
-      .text(card.value, x + 3, y + 27, { width: cardWidth - 6, align: "center", lineBreak: false });
-  });
-  y += 67;
+    { label: "إجمالي المعاينات", value: formatMoney(report.consultationTotal) },
+    { label: "إجمالي الفحوصات", value: formatMoney(report.testsTotal) },
+  ]);
+
   doc.font("Amiri").fillColor("#536970").fontSize(9)
-    .text("جميع المبالغ في هذا التقرير بالجنيه السوداني.", LEFT, y, { width: CONTENT_WIDTH, align: "right" });
-  y += 28;
+    .text(`المعاينات: ${report.consultationCount} (عمومي ${report.consultationGeneralCount} · اختصاصي ${report.consultationSpecialistCount}). جميع المبالغ بالجنيه السوداني.`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
+  y += 17;
+  if (report.paymentBreakdown.length) {
+    const methods = report.paymentBreakdown
+      .map(row => `${safeText(row.method, 24)}: ${row.count} (${formatMoney(row.total)})`)
+      .join(" · ");
+    doc.fillColor("#6d7e82").fontSize(8)
+      .text(`طرق التحصيل: ${methods}`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
+    y += 14;
+  }
+  y += 10;
 
   const drawTable = (title: string, rows: TableEntry[], emptyText: string) => {
     const drawTableHeading = (continued = false) => {
@@ -137,7 +165,7 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
     for (const row of rows) {
       if (y + 28 > 780) startNewPage(true);
       let x = LEFT;
-      const values = [row.invoice, row.patient, row.time, row.state, row.total];
+      const values = [row.invoice, row.patient, row.service, row.time, row.state, row.total];
       values.forEach((value, index) => {
         const column = TABLE_COLUMNS[index];
         doc.font("Amiri").fillColor("#243b40").fontSize(8)
@@ -165,4 +193,18 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
     .text(`${footer}يُحتسب إنشاء الفاتورة بحسب وقت الإنشاء، ويُحتسب التحصيل بحسب وقت الدفع. لا يتضمن التقرير نتائج المختبر أو بيانات التشخيص.`, LEFT, Math.min(y + 5, 780), { width: CONTENT_WIDTH, align: "right" });
   doc.end();
   return pdfPromise;
+}
+
+/**
+ * Reports are rendered through headless Chromium when it is available so Arabic
+ * shaping and bidirectional text are correct. PDFKit remains a dependency-free
+ * fallback for hosts without a browser binary.
+ */
+export async function renderOperationalReportPdf(report: OperationalReport, clinicName: string, branding: { clinicAddress?: string | null; clinicPhone?: string | null; clinicWebsite?: string | null; clinicFooterText?: string | null } = {}): Promise<Buffer> {
+  try {
+    return await renderOperationalReportHtmlPdf(report, clinicName, branding);
+  } catch (error) {
+    console.warn("[Reports] HTML PDF rendering failed, falling back to PDFKit:", error instanceof Error ? error.message : error);
+    return renderOperationalReportPdfWithPdfKit(report, clinicName, branding);
+  }
 }

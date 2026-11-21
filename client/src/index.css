@@ -143,8 +143,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
   .screen-close-print { display: none !important; }
   .thermal-doc { width: 80mm; min-height: 120mm; margin: 0 auto; padding: 15px 10px; font-size: 10px; }
   .print-brand { display: flex; align-items: center; gap: 9px; }.print-brand img { width: 32px; height: 32px; }.print-brand strong { display: block; font-size: 12px; }.print-brand span { display: block; margin-top: 3px; color: #687a80; font-size: 8px; }.print-rule { margin: 13px 0; border-top: 1px dashed #9aabad; }.print-center { display: grid; gap: 4px; text-align: center; }.print-center strong { font-size: 13px; }.print-center span { color: #73848a; font-size: 9px; }.print-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0; }.print-info div, .patient-print-grid div { display: grid; gap: 3px; }.print-info span, .patient-print-grid span { color: #7c8c90; font-size: 8px; }.print-info strong, .patient-print-grid strong { font-size: 9px; }.print-table { border-top: 1px solid #cbd5d5; border-bottom: 1px solid #cbd5d5; }.print-row { display: flex; justify-content: space-between; gap: 9px; padding: 7px 0; border-bottom: 1px dashed #e0e5e5; }.print-row:last-child { border-bottom: 0; }.print-row span:last-child { white-space: nowrap; }.print-head { color: #809094; font-weight: bold; }.print-total { display: flex; justify-content: space-between; margin-top: 12px; padding: 10px 0; border-top: 2px solid #173e4c; font-size: 12px; }.print-footer { margin-top: 25px; color: #75868a; text-align: center; font-size: 8px; line-height: 1.8; }
-  .a4-doc { min-height: 297mm; padding: 18mm 16mm 14mm; }.a4-header { display: flex; align-items: flex-start
- justify-content: space-between; gap: 20px; }.report-meta { display: grid; gap: 5px; color: #62777d; text-align: left; font-size: 9px; }.report-meta strong { color: #1a4b58; font-size: 13px; }.patient-print-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 24px 0; padding: 15px; background: #f6f9f8; border: 1px solid #e5eeec; border-radius: 4px; }.result-print-title { margin: 24px 0 15px; }.result-print-title > span { color: #168a81; font-size: 9px; font-weight: bold; }.result-print-title h1 { margin: 6px 0 3px; font-size: 20px; }.result-print-title p { margin: 0; color: #788a8e; font-size: 10px; }.result-print-table { width: 100%; border-collapse: collapse; font-size: 9px; }.result-print-table th { padding: 9px 8px; color: #61767c; background: #edf6f4; border-bottom: 1px solid #cfe4e0; text-align: right; }.result-print-table td { padding: 10px 8px; border-bottom: 1px solid #e5eceb; }.result-print-table td strong { color: #0e877d; font-size: 10px; }.remarks-print { min-height: 58px; margin-top: 20px; padding: 11px; border: 1px solid #e2eae9; border-radius: 4px; }.remarks-print strong { font-size: 9px; }.remarks-print p { margin: 8px 0 0; color: #61767c; font-size: 9px; }.signature-row { display: flex; justify-content: space-between; margin-top: 30px; }.signature-row div { display: grid; gap: 8px; min-width: 150px; }.signature-row span { color: #829195; font-size: 8px; }.signature-row strong { font-size: 9px; }.result-print-table tr, .remarks-print, .signature-row { break-inside: avoid; page-break-inside: avoid; }.a4-footer { position: absolute; right: 16mm; bottom: 10mm; left: 16mm; display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #dce5e3; color: #839296; font-size: 8px; }.report-print-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin: 20px 0; }.report-print-cards div { display: grid; gap: 7px; padding: 12px; background: #f5faf9; border: 1px solid #e3eeeb; border-radius: 4px; }.report-print-cards span { color: #788b90; font-size: 8px; }.report-print-cards strong { color: #176f6b; font-size: 14px; }.print-subtitle { margin: 25px 0 10px; font-size: 12px; }
+  .a4-doc { min-height: 297mm; padding: 18mm 16mm 14mm; }.a4-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }.report-meta { display: grid; gap: 5px; color: #62777d; text-align: left; font-size: 9px; }.report-meta strong { color: #1a4b58; font-size: 13px; }.patient-print-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 24px 0; padding: 15px; background: #f6f9f8; border: 1px solid #e5eeec; border-radius: 4px; }.result-print-title { margin: 24px 0 15px; }.result-print-title > span { color: #168a81; font-size: 9px; font-weight: bold; }.result-print-title h1 { margin: 6px 0 3px; font-size: 20px; }.result-print-title p { margin: 0; color: #788a8e; font-size: 10px; }.result-print-table { width: 100%; border-collapse: collapse; font-size: 9px; }.result-print-table th { padding: 9px 8px; color: #61767c; background: #edf6f4; border-bottom: 1px solid #cfe4e0; text-align: right; }.result-print-table td { padding: 10px 8px; border-bottom: 1px solid #e5eceb; }.result-print-table td strong { color: #0e877d; font-size: 10px; }.remarks-print { min-height: 58px; margin-top: 20px; padding: 11px; border: 1px solid #e2eae9; border-radius: 4px; }.remarks-print strong { font-size: 9px; }.remarks-print p { margin: 8px 0 0; color: #61767c; font-size: 9px; }.signature-row { display: flex; justify-content: space-between; margin-top: 30px; }.signature-row div { display: grid; gap: 8px; min-width: 150px; }.signature-row span { color: #829195; font-size: 8px; }.signature-row strong { font-size: 9px; }.result-print-table tr, .remarks-print, .signature-row { break-inside: avoid; page-break-inside: avoid; }.a4-footer { position: absolute; right: 16mm; bottom: 10mm; left: 16mm; display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #dce5e3; color: #839296; font-size: 8px; }.report-print-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin: 20px 0; }.report-print-cards div { display: grid; gap: 7px; padding: 12px; background: #f5faf9; border: 1px solid #e3eeeb; border-radius: 4px; }.report-print-cards span { color: #788b90; font-size: 8px; }.report-print-cards strong { color: #176f6b; font-size: 14px; }.print-subtitle { margin: 25px 0 10px; font-size: 12px; }
 }
 
 @media (max-width: 1180px) {
@@ -208,3 +207,103 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .catalog-access.readonly { color: #8b7a4e; background: #fff7e5; }
 
 .readonly-badge { padding: 5px 8px; color: #8b7a4e; background: #fff7e5; border-radius: 5px; font-size: 9px; }
+
+
+/* ===== Consultation pricing, reports and team management ===== */
+.consultation-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.consultation-card { display: grid; grid-template-columns: auto 1fr 150px; gap: 12px; align-items: center; padding: 16px; background: #fbfdfd; border: 1px solid var(--line); border-radius: 12px; }
+.consultation-icon { width: 38px; height: 38px; display: grid; place-items: center; color: var(--teal); background: #e9f7f4; border-radius: 10px; }
+.consultation-icon.specialist { color: #4d6bc0; background: #eef2fd; }
+.consultation-card strong { display: block; color: #2c4c55; font-size: 12px; }
+.consultation-card > div > span { display: block; margin-top: 3px; color: #93a3a7; font-size: 9px; }
+.consultation-card .form-field { min-width: 120px; }
+.consultation-card .form-field input { height: 34px; }
+.panel-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #edf2f1; }
+.consultation-choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.consultation-choice button { display: flex; align-items: center; gap: 9px; padding: 10px 11px; color: #6f8388; text-align: right; background: #fbfdfd; border: 1px solid #e9efee; border-radius: 9px; }
+.consultation-choice button.active { color: #237a73; background: #eaf8f5; border-color: #9fdcd4; box-shadow: 0 0 0 2px #f0fbf9; }
+.consultation-choice button > span:nth-child(2) { display: grid; flex: 1; gap: 3px; }
+.consultation-choice strong { font-size: 10px; }
+.consultation-choice small { color: #94a5a9; font-size: 8px; }
+.consultation-choice button.active small { color: #3d8f87; }
+.choice-icon { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; background: #f1f6f5; border-radius: 7px; }
+.consultation-choice button.active .choice-icon { background: #d7f2ed; }
+.price-table td { vertical-align: middle; }
+.price-input { width: 112px; height: 32px; padding: 0 8px; color: #31525b; background: #fff; border: 1px solid #e6eeec; border-radius: 7px; font-size: 11px; text-align: left; direction: ltr; }
+.price-input:disabled { color: #8a999d; background: #f7f9f9; }
+.dirty-row { background: #fffdf5; }
+.dirty-row .price-input { background: #fffaf0; border-color: #e8cf8a; }
+.report-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.report-cards > div { display: grid; gap: 6px; padding: 16px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.report-cards span { color: #8b9b9f; font-size: 10px; }
+.report-cards strong { color: #274a54; font-size: 18px; }
+.report-cards small { color: #a4b0b3; font-size: 9px; }
+.report-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 18px; }
+.report-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+.inline-field { display: flex; align-items: center; gap: 8px; }
+.inline-field > span { white-space: nowrap; }
+.inline-field input { height: 32px; }
+.payment-methods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 20px 18px; }
+.payment-methods > div { display: grid; gap: 4px; padding: 12px; background: #fbfdfd; border: 1px solid #edf2f1; border-radius: 9px; }
+.payment-methods span { color: #8b9b9f; font-size: 9px; }
+.payment-methods strong { color: #2c6f69; font-size: 13px; }
+.payment-methods small { color: #a6b2b5; font-size: 8px; }
+.contact-lines { display: grid; gap: 4px; }
+.contact-lines span { display: flex; align-items: center; gap: 5px; color: #7d9095; font-size: 9px; }
+.account-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; color: #2b7d74; background: #eaf8f5; border-radius: 6px; font-size: 9px; }
+.wide-modal { width: min(860px, 100%); }
+.modal-hint { display: flex; gap: 8px; margin-top: 14px; padding: 10px 12px; color: #82969a; background: #f6fbfa; border: 1px solid #e6f1ef; border-radius: 8px; font-size: 9px; line-height: 1.7; }
+.modal-hint svg { flex: 0 0 auto; margin-top: 2px; color: var(--teal); }
+.modal-paragraph { margin: 10px 0 0; color: #87999d; font-size: 10px; line-height: 1.8; }
+.test-picker-wrap { display: grid; gap: 9px; }
+.test-picker-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.compact-search { min-width: 210px; height: 34px; }
+.small-tabs button { padding: 5px 8px; font-size: 9px; }
+.test-picker button em { color: #9aa9ad; font-size: 8px; font-style: normal; }
+.test-picker button.selected em { color: #2b8a80; }
+.test-picker button.disabled { opacity: .45; cursor: not-allowed; }
+.compact-empty { padding: 16px; }
+.editor-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 18px; }
+.editor-summary > div { display: grid; gap: 4px; padding: 10px; background: #fafcfc; border: 1px solid #e9f0ee; border-radius: 9px; }
+.editor-summary span { color: #94a4a8; font-size: 9px; }
+.editor-summary strong { color: #3d6268; font-size: 11px; }
+.locked-banner.danger { color: #a74848; background: #fff2f2; border-color: #f6d3d3; }
+.locked-banner.danger span { color: #b06a6a; }
+.consultation-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: #3f6f9e; background: #eef6fd; border-radius: 6px; font-size: 9px; font-weight: 700; }
+.drawer-chip-row { margin-top: 10px; }
+.lab-top-label { color: #6f858a; font-size: 10px; font-weight: 700; }
+.range-chip.low { color: #b26b2d; background: #fff4e8; }
+.range-chip.high { color: #b04a4a; background: #fff0f0; }
+.flag-chip { position: absolute; left: 62px; top: 8px; padding: 2px 5px; border-radius: 4px; font-size: 8px; font-weight: 800; }
+.flag-chip.high { color: #b04a4a; background: #ffe9e9; }
+.flag-chip.low { color: #b26b2d; background: #fff1e0; }
+.tab-dot.queued { background: #d9a24a; }
+.tab-dot.in_progress { background: #4f86c6; }
+.tab-dot.completed { background: #2f9a8c; }
+.tab-dot.blocked { background: #c05b5b; }
+.logo-preview { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid #e5eeec; border-radius: 8px; }
+.logo-preview img { width: 48px; height: 48px; object-fit: contain; }
+.logo-preview span { color: #7f9499; font-size: 10px; }
+.app-splash { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 16px; color: #6f858a; background: #f4f8f7; font-size: 12px; }
+.welcome-screen { min-height: 100vh; display: grid; place-items: center; padding: 30px; background: radial-gradient(circle at 20% 10%, #e8f6f3, transparent 45%), radial-gradient(circle at 85% 85%, #eef3fd, transparent 40%), #f6faf9; }
+.welcome-card { width: min(620px, 100%); display: grid; justify-items: center; gap: 14px; padding: 34px; text-align: center; background: #fff; border: 1px solid #e4eeec; border-radius: 20px; box-shadow: 0 30px 80px rgba(17, 60, 70, .1); }
+.welcome-card h1 { margin: 0; color: #24464f; font-size: 26px; }
+.welcome-card p { max-width: 470px; margin: 0; color: #7f9499; font-size: 12px; line-height: 1.9; }
+.welcome-actions { display: flex; gap: 9px; margin-top: 4px; }
+.welcome-roles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; margin-top: 8px; }
+.welcome-roles > div { display: grid; justify-items: center; gap: 6px; padding: 12px 6px; color: #6d8388; background: #f8fbfa; border: 1px solid #e9f1ef; border-radius: 9px; font-size: 9px; }
+.welcome-roles svg { color: var(--teal); }
+
+@media (max-width: 1100px) {
+  .report-cards { grid-template-columns: repeat(3, 1fr); }
+  .consultation-grid { grid-template-columns: 1fr; }
+  .editor-summary { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 760px) {
+  .report-cards, .payment-methods, .welcome-roles { grid-template-columns: repeat(2, 1fr); }
+  .consultation-choice { grid-template-columns: 1fr; }
+  .consultation-card { grid-template-columns: auto 1fr; }
+  .consultation-card .form-field { grid-column: 1 / -1; }
+  .report-toolbar { flex-direction: column; align-items: stretch; }
+  .wide-modal { width: 100%; }
+}
