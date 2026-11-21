@@ -65,7 +65,7 @@ const CONSULTATION_FEE = 35000;
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(opts => opts.ctx.user ?? null),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -121,7 +121,10 @@ export const appRouter = router({
       const codes = uniqueTestCodes(input.testCodes);
 
       return db.transaction(async tx => {
-        await tx.insert(shifts).values({
+        const [knownShift] = await tx.select().from(shifts)
+          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
+          .limit(1).for("update");
+        if (!knownShift) await tx.insert(shifts).values({
           shiftDate: input.shiftDate,
           shiftType: input.shiftType,
           cashierUserId: ctx.user.id,
@@ -191,7 +194,10 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [patient] = await tx.select().from(patients).where(eq(patients.patientNumber, input.patientNumber)).limit(1).for("update");
         if (!patient) throw new TRPCError({ code: "NOT_FOUND", message: "ملف المريض غير موجود" });
-        await tx.insert(shifts).values({
+        const [knownShift] = await tx.select().from(shifts)
+          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
+          .limit(1).for("update");
+        if (!knownShift) await tx.insert(shifts).values({
           shiftDate: input.shiftDate,
           shiftType: input.shiftType,
           cashierUserId: ctx.user.id,
@@ -245,12 +251,20 @@ export const appRouter = router({
     open: roleProcedure("cashier", "supervisor").input(z.object({ shiftDate: z.string(), shiftType: z.enum(["morning", "evening", "night"]) })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database is not available");
-      await db.insert(shifts).values({ shiftDate: input.shiftDate, shiftType: input.shiftType, cashierUserId: ctx.user.id })
-        .onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
-      const [shift] = await db.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
-        .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
-      if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
-      return shift;
+      return db.transaction(async tx => {
+        const [existing] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
+          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+        if (existing) {
+          if (existing.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية مغلقة" });
+          return existing;
+        }
+        await tx.insert(shifts).values({ shiftDate: input.shiftDate, shiftType: input.shiftType, cashierUserId: ctx.user.id })
+          .onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
+        const [shift] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
+          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+        if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
+        return shift;
+      });
     }),
   }),
 
