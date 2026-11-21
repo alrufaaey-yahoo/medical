@@ -9,6 +9,10 @@ export type ReportDownloadInput = {
 export type LoadedReport = {
   report: OperationalReport;
   clinicName: string;
+  clinicAddress?: string | null;
+  clinicPhone?: string | null;
+  clinicWebsite?: string | null;
+  clinicFooterText?: string | null;
 };
 
 export type ReportDownloadResponse = {
@@ -32,7 +36,7 @@ export async function createReportDownloadResponse(
   input: ReportDownloadInput,
   dependencies: {
     loadReport: (window: ReportWindow) => Promise<LoadedReport | null>;
-    renderPdf: (report: OperationalReport, clinicName: string) => Promise<Buffer>;
+    renderPdf: (report: OperationalReport, clinicName: string, branding?: Omit<LoadedReport, "report" | "clinicName">) => Promise<Buffer>;
   },
 ): Promise<ReportDownloadResponse> {
   if (input.role == null) return { status: 401, body: { error: "يلزم تسجيل الدخول لتنزيل التقرير" } };
@@ -49,7 +53,12 @@ export async function createReportDownloadResponse(
   try {
     const loaded = await dependencies.loadReport(window);
     if (!loaded) return { status: 503, body: { error: "قاعدة البيانات غير متاحة؛ لم يتم إنشاء التقرير" } };
-    const pdf = await dependencies.renderPdf(loaded.report, loaded.clinicName);
+    const pdf = await dependencies.renderPdf(loaded.report, loaded.clinicName, {
+      clinicAddress: loaded.clinicAddress,
+      clinicPhone: loaded.clinicPhone,
+      clinicWebsite: loaded.clinicWebsite,
+      clinicFooterText: loaded.clinicFooterText,
+    });
     const filename = `clinic-report-${window.period}-${window.dateKey}.pdf`;
     return {
       status: 200,

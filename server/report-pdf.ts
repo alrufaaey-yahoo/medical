@@ -50,7 +50,7 @@ function tableEntry(row: ReportInvoiceRow, collected: boolean): TableEntry {
   };
 }
 
-export async function renderOperationalReportPdf(report: OperationalReport, clinicName: string): Promise<Buffer> {
+export async function renderOperationalReportPdf(report: OperationalReport, clinicName: string, branding: { clinicAddress?: string | null; clinicPhone?: string | null; clinicWebsite?: string | null; clinicFooterText?: string | null } = {}): Promise<Buffer> {
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 38, right: LEFT, bottom: 42, left: LEFT },
@@ -76,7 +76,9 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
       .text(report.period === "daily" ? "تقرير حركة المستوصف اليومي" : "تقرير حركة المستوصف الشهري", LEFT, 67, { width: CONTENT_WIDTH, align: "right" });
     doc.fillColor("#536970").fontSize(10)
       .text(`الفترة: ${formatReportPeriod(report)} · المنطقة الزمنية: الخرطوم`, LEFT, 91, { width: CONTENT_WIDTH, align: "right" });
-    doc.moveTo(LEFT, 112).lineTo(PAGE_WIDTH - LEFT, 112).strokeColor("#d7e5e3").stroke();
+    const contact = [branding.clinicAddress, branding.clinicPhone, branding.clinicWebsite].filter(Boolean).map(value => safeText(value, 120)).join(" · ");
+    if (contact) doc.fillColor("#6d7e82").fontSize(8).text(contact, LEFT, 104, { width: CONTENT_WIDTH, align: "right" });
+    doc.moveTo(LEFT, contact ? 124 : 112).lineTo(PAGE_WIDTH - LEFT, contact ? 124 : 112).strokeColor("#d7e5e3").stroke();
   };
 
   drawPageHeader();
@@ -156,8 +158,9 @@ export async function renderOperationalReportPdf(report: OperationalReport, clin
     report.collectedInvoices.map(row => tableEntry(row, true)),
     "لا توجد تحصيلات مسجلة في الفترة المحددة.",
   );
+  const footer = branding.clinicFooterText ? `${safeText(branding.clinicFooterText, 240)}\n` : "";
   doc.font("Amiri").fillColor("#6d7e82").fontSize(8)
-    .text("يُحتسب إنشاء الفاتورة بحسب وقت الإنشاء، ويُحتسب التحصيل بحسب وقت الدفع. لا يتضمن التقرير نتائج المختبر أو بيانات التشخيص.", LEFT, Math.min(y + 5, 780), { width: CONTENT_WIDTH, align: "right" });
+    .text(`${footer}يُحتسب إنشاء الفاتورة بحسب وقت الإنشاء، ويُحتسب التحصيل بحسب وقت الدفع. لا يتضمن التقرير نتائج المختبر أو بيانات التشخيص.`, LEFT, Math.min(y + 5, 780), { width: CONTENT_WIDTH, align: "right" });
   doc.end();
   return pdfPromise;
 }

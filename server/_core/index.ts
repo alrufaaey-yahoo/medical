@@ -75,11 +75,15 @@ async function startServer() {
               lt(invoices.paidAt, window.end),
             ))
             .orderBy(desc(invoices.paidAt)),
-          db.select({ name: clinicSettings.name }).from(clinicSettings).limit(1),
+          db.select({ name: clinicSettings.name, address: clinicSettings.address, phone: clinicSettings.phone, website: clinicSettings.website, footerText: clinicSettings.footerText }).from(clinicSettings).limit(1),
         ]);
         return {
           report: buildOperationalReport(window, issuedRows, collectedRows),
           clinicName: settingsRows[0]?.name ?? "مستوصف بكّا الطبي الحديث",
+          clinicAddress: settingsRows[0]?.address,
+          clinicPhone: settingsRows[0]?.phone,
+          clinicWebsite: settingsRows[0]?.website,
+          clinicFooterText: settingsRows[0]?.footerText,
         };
       },
       renderPdf: renderOperationalReportPdf,
