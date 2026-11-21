@@ -17,6 +17,7 @@ import { getDb } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
+import { canAdminUpdateRole } from "./_core/role-access";
 import { sumInvoiceItems, toInvoiceNumber, toPatientNumber, uniqueTestCodes } from "./medical-workflow";
 
 const patientInput = z.object({
@@ -92,7 +93,7 @@ export const appRouter = router({
       userId: z.number().int().positive(),
       role: z.enum(["admin", "cashier", "lab", "supervisor"]),
     })).mutation(async ({ input, ctx }) => {
-      if (input.userId === ctx.user.id && input.role !== "admin") {
+      if (!canAdminUpdateRole(ctx.user.id, input.userId, input.role)) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن للمدير خفض صلاحية حسابه الحالي" });
       }
       const db = await getDb();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasRoleAccess } from "./role-access";
+import { canAdminUpdateRole, hasRoleAccess } from "./role-access";
 
 describe("role access", () => {
   const settingsRoles = ["supervisor"] as const;
@@ -10,6 +10,13 @@ describe("role access", () => {
 
   it("allows supervisor to save clinic settings", () => {
     expect(hasRoleAccess("supervisor", settingsRoles)).toBe(true);
+  });
+
+
+  it("prevents an admin from demoting the current account", () => {
+    expect(canAdminUpdateRole(7, 7, "cashier")).toBe(false);
+    expect(canAdminUpdateRole(7, 7, "admin")).toBe(true);
+    expect(canAdminUpdateRole(7, 8, "cashier")).toBe(true);
   });
 
   it("denies cashier, lab, and demo users", () => {
