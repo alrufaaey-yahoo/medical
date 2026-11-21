@@ -11,11 +11,12 @@ import {
   labTests,
   patients,
   shifts,
+  users,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { sumInvoiceItems, toInvoiceNumber, toPatientNumber, uniqueTestCodes } from "./medical-workflow";
 
 const patientInput = z.object({
@@ -70,6 +71,35 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+  }),
+
+  users: router({
+    list: adminProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      return db.select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        loginMethod: users.loginMethod,
+        role: users.role,
+        createdAt: users.createdAt,
+        lastSignedIn: users.lastSignedIn,
+      }).from(users).orderBy(desc(users.createdAt));
+    }),
+    updateRole: adminProcedure.input(z.object({
+      userId: z.number().int().positive(),
+      role: z.enum(["admin", "cashier", "lab", "supervisor"]),
+    })).mutation(async ({ input, ctx }) => {
+      if (input.userId === ctx.user.id && input.role !== "admin") {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن للمدير خفض صلاحية حسابه الحالي" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const result = await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId));
+      if (result[0].affectedRows === 0) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
+      return { success: true, userId: input.userId, role: input.role } as const;
     }),
   }),
 
