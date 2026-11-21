@@ -50,7 +50,7 @@ import {
   getNextPatientIdentity,
 } from "@/lib/clinic-workflow";
 
-type Section = "overview" | "patients" | "billing" | "lab" | "tests" | "reports" | "settings";
+type Section = "overview" | "patients" | "billing" | "lab" | "tests" | "reports" | "users" | "settings";
 type Role = "supervisor" | "cashier" | "lab" | "admin";
 type Shift = "صباحية" | "مسائية" | "سهرة";
 type PrintMode = "invoice" | "result" | "report" | "patient-report" | null;
@@ -139,6 +139,7 @@ const navItems: NavItem[] = [
   { id: "lab", label: "المختبر", icon: FlaskConical, badge: "7" },
   { id: "tests", label: "كتالوج الفحوصات", icon: TestTube2 },
   { id: "reports", label: "التقارير", icon: FileBarChart },
+  { id: "users", label: "المستخدمون", icon: UserPlus },
   { id: "settings", label: "الإعدادات", icon: Settings2 },
 ];
 
@@ -165,7 +166,7 @@ const roleSections: Record<Role, Section[]> = {
   supervisor: ["overview", "patients", "billing", "lab", "reports"],
   cashier: ["overview", "patients", "billing"],
   lab: ["overview", "lab", "tests"],
-  admin: ["overview", "patients", "billing", "lab", "tests", "reports", "settings"],
+  admin: ["overview", "patients", "billing", "lab", "tests", "reports", "users", "settings"],
 };
 const sectionLabels: Record<Section, string> = {
   overview: "النظرة العامة",
@@ -174,6 +175,7 @@ const sectionLabels: Record<Section, string> = {
   lab: "المختبر",
   tests: "كتالوج الفحوصات",
   reports: "التقارير",
+  users: "المستخدمون",
   settings: "الإعدادات",
 };
 
@@ -594,6 +596,26 @@ function AccessDenied({ role, section }: { role: Role; section: Section }) {
   return <div className="page-stack"><SectionTitle eyebrow="الوصول المقيّد" title="هذا القسم غير متاح لهذا الدور" description={`لا يملك دور ${roleLabels[role]} صلاحية فتح قسم ${sectionLabels[section]} حاليًا.`} /><div className="panel empty-state"><ShieldCheck size={24} /><strong>الصلاحية غير متوفرة</strong><span>اختر قسمًا من القائمة الجانبية المسموحة لدورك، أو بدّل الدور من شاشة الدخول.</span></div></div>;
 }
 type ClinicSettingsDraft = { name: string; address: string; phone: string; email: string; website: string; footerText: string };
+
+function UsersManagement({ canManage, onToast }: { canManage: boolean; onToast: (message: string) => void }) {
+  const usersQuery = trpc.users.list.useQuery(undefined, { enabled: canManage, retry: false });
+  const updateRoleMutation = trpc.users.updateRole.useMutation();
+  const trpcUtils = trpc.useUtils();
+  const roleOptions: Role[] = ["admin", "supervisor", "cashier", "lab"];
+  const roleNames: Record<Role | "user", string> = { ...roleLabels, user: "غير معيّن" };
+
+  const updateRole = (userId: number, role: Role) => {
+    updateRoleMutation.mutate({ userId, role }, {
+      onSuccess: () => {
+        void trpcUtils.users.list.invalidate();
+        onToast("تم تحديث دور المستخدم");
+      },
+      onError: (error) => onToast(error.message || "تعذر تحديث دور المستخدم"),
+    });
+  };
+
+  return <div className="page-stack"><SectionTitle eyebrow="الإدارة والصلاحيات" title="إدارة المستخدمين" description="عيّن أدوار حسابات Manus الفعلية. لا تمنح هذه الشاشة أي صلاحيات في وضع العرض التجريبي." action={<span className="saved-badge">المدير فقط</span>} />{!canManage ? <div className="panel empty-state"><ShieldCheck size={24} /><strong>تتطلب جلسة مدير رسمية</strong><span>سجّل الدخول عبر Manus بحساب مدير النظام لعرض الحسابات وتعيين الأدوار.</span></div> : usersQuery.isLoading ? <div className="panel empty-state"><strong>جارٍ تحميل المستخدمين...</strong></div> : usersQuery.isError ? <div className="panel empty-state"><AlertCircle size={24} /><strong>تعذر تحميل المستخدمين</strong><span>{usersQuery.error.message}</span></div> : <section className="panel"><div className="panel-header"><div><span className="eyebrow">حسابات Manus</span><h2>الحسابات المرتبطة بالمستوصف</h2></div><span className="catalog-count">{usersQuery.data?.length ?? 0} حسابات</span></div><div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>طريقة الدخول</th><th>آخر دخول</th><th>الدور</th></tr></thead><tbody>{usersQuery.data?.map((user) => <tr key={user.id}><td><div className="person-cell"><div className="avatar small">{initials(user.name ?? user.email ?? "مستخدم")}</div><span><strong>{user.name ?? "بدون اسم"}</strong><span className="muted-line">{user.email ?? "لا يوجد بريد"}</span></span></div></td><td>{user.loginMethod ?? "Manus"}</td><td>{user.lastSignedIn ? formatClinicTime(new Date(user.lastSignedIn)) : "—"}</td><td><select value={user.role} disabled={updateRoleMutation.isPending} onChange={(event) => updateRole(user.id, event.target.value as Role)}>{user.role === "user" && <option value="user">{roleNames.user}</option>}{roleOptions.map((role) => <option key={role} value={role}>{roleNames[role]}</option>)}</select></td></tr>)}</tbody></table>{usersQuery.data?.length === 0 && <div className="empty-state"><Users size={22} /><strong>لا توجد حسابات</strong><span>ستظهر الحسابات بعد تسجيل الدخول الرسمي.</span></div>}</div></section>}</div>;
+}
 
 function Settings({ role, setRole, roleLocked, shift, setShift, clinicName, clinicAddress, clinicPhone, clinicEmail, clinicWebsite, clinicFooterText, onSave, saving, canSave }: { role: Role; setRole: (role: Role) => void; roleLocked: boolean; shift: Shift; setShift: (shift: Shift) => void; clinicName: string; clinicAddress: string; clinicPhone: string; clinicEmail: string; clinicWebsite: string; clinicFooterText: string; onSave: (draft: ClinicSettingsDraft) => void; saving: boolean; canSave: boolean }) {
   const [draft, setDraft] = useState<ClinicSettingsDraft>({ name: clinicName, address: clinicAddress, phone: clinicPhone, email: clinicEmail, website: clinicWebsite, footerText: clinicFooterText });
@@ -1053,6 +1075,7 @@ export default function Home() {
     if (activeSection === "lab") return <Lab patients={patients} selectedPatientId={selectedPatientId} setSelectedPatientId={(id) => { setSelectedPatientId(id); setSelectedTestCode(patients.find((patient) => patient.id === id)?.tests[0] ?? "CBC"); setResultDraft(results[`${id}-${patients.find((patient) => patient.id === id)?.tests[0] ?? "CBC"}`] ?? {}); }} selectedTestCode={selectedTestCode} setSelectedTestCode={changeTest} results={results} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} savingResult={resultMutation.isPending} onPrintResult={() => triggerPrint("result")} />;
     if (activeSection === "tests") return <TestsCatalog onToast={setToast} prices={catalogPrices} canEdit={effectiveRole === "admin" || effectiveRole === "supervisor"} />;
     if (activeSection === "reports") return <Reports patients={billingPatients} onPrintReport={(range) => triggerPrint("report", undefined, range)} />;
+    if (activeSection === "users") return <UsersManagement canManage={hasOperationalRole && effectiveRole === "admin"} onToast={setToast} />;
     return <Settings role={effectiveRole} setRole={setActiveRole} roleLocked={hasOperationalRole} shift={shift} setShift={setShift} clinicName={clinicQuery.data?.name ?? "مستوصف بكّا الطبي الحديث"} clinicAddress={clinicQuery.data?.address ?? "الخرطوم بحري · السودان"} clinicPhone={clinicQuery.data?.phone ?? "011 234 5678 · 0912 440 218"} clinicEmail={clinicQuery.data?.email ?? "info@bakka-clinic.sd"} clinicWebsite={clinicQuery.data?.website ?? "www.bakka-clinic.sd"} clinicFooterText={clinicQuery.data?.footerText ?? "نتمنى لكم دوام الصحة والعافية. هذه النتيجة تعتمد على العينة والطريقة المعتمدة بالمختبر."} onSave={handleSaveClinicSettings} saving={saveClinicSettingsMutation.isPending} canSave={sessionRole === "admin" || sessionRole === "supervisor"} />;
   };
 
