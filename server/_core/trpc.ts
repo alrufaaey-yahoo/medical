@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { hasRoleAccess } from "./role-access";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -49,7 +50,7 @@ export const roleProcedure = (...roles: Array<'admin' | 'cashier' | 'lab' | 'sup
     t.middleware(async opts => {
       const user = opts.ctx.user;
       const role = user?.role as 'admin' | 'cashier' | 'lab' | 'supervisor' | 'user' | undefined;
-      if (!user || (role !== 'admin' && !roles.includes(role as 'cashier' | 'lab' | 'supervisor'))) {
+      if (!user || !hasRoleAccess(role, roles)) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'ليس لديك صلاحية لهذا الإجراء' });
       }
       return opts.next();
