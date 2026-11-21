@@ -19,6 +19,12 @@ export type FollowUpPatient = {
   status: "في الانتظار" | "في المختبر" | "مكتملة";
 };
 
+export type ReportRange = "today" | "month";
+
+export type DatedClinicRecord = {
+  registeredDate?: string;
+};
+
 const arabicDateFormatter = new Intl.DateTimeFormat("ar-SD", {
   day: "numeric",
   month: "long",
@@ -57,6 +63,14 @@ export function getClinicDateKey(date = new Date()): string {
 
 export function formatClinicTime(date = new Date()): string {
   return arabicTimeFormatter.format(date);
+}
+
+export function filterRecordsByReportRange<T extends DatedClinicRecord>(records: T[], range: ReportRange, currentDate = getClinicDateKey()): T[] {
+  const currentMonth = currentDate.slice(0, 7);
+  return records.filter((record) => {
+    if (!record.registeredDate) return true;
+    return range === "today" ? record.registeredDate === currentDate : record.registeredDate.startsWith(currentMonth);
+  });
 }
 
 function largestTrailingNumber(values: string[], prefix: RegExp): number {

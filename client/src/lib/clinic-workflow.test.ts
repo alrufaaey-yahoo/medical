@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createFollowUpInvoice,
+  filterRecordsByReportRange,
   formatClinicDateFromKey,
   getClinicDateKey,
   getCurrentClinicShift,
@@ -22,6 +23,18 @@ describe("clinic shift and registration identifiers", () => {
     expect(getClinicDateKey(new Date(2027, 0, 1, 0, 1))).toBe("2027-01-01");
     expect(formatClinicDateFromKey("2026-11-21")).not.toBe("2026-11-21");
     expect(formatClinicDateFromKey("invalid-date")).toBe("invalid-date");
+  });
+
+  it("filters report records by the local day and month while keeping undated demo records visible", () => {
+    const records = [
+      { id: "today", registeredDate: "2026-11-21" },
+      { id: "month", registeredDate: "2026-11-03" },
+      { id: "older", registeredDate: "2026-10-31" },
+      { id: "demo" },
+    ];
+
+    expect(filterRecordsByReportRange(records, "today", "2026-11-21").map((record) => record.id)).toEqual(["today", "demo"]);
+    expect(filterRecordsByReportRange(records, "month", "2026-11-21").map((record) => record.id)).toEqual(["today", "month", "demo"]);
   });
 
   it("creates sequential patient and invoice numbers from existing records", () => {

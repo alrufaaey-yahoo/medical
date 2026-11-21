@@ -41,6 +41,7 @@ import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
   createFollowUpInvoice,
+  filterRecordsByReportRange,
   formatClinicDate,
   formatClinicDateFromKey,
   formatClinicTime,
@@ -527,10 +528,7 @@ function Patients({ patients, search, setSearch, onAddPatient, onSelectPatient, 
 function Billing({ patients, onAddPatient, onPrintInvoice, onMarkPaid, saving }: { patients: Patient[]; onAddPatient: () => void; onPrintInvoice: (patient: Patient) => void; onMarkPaid: (patient: Patient) => void; saving?: boolean }) {
   const [range, setRange] = useState<ReportRange>("today");
   const currentDate = getClinicDateKey();
-  const visiblePatients = patients.filter((patient) => {
-    if (!patient.registeredDate) return true;
-    return range === "today" ? patient.registeredDate === currentDate : patient.registeredDate.startsWith(currentDate.slice(0, 7));
-  });
+  const visiblePatients = filterRecordsByReportRange(patients, range, currentDate);
   const total = visiblePatients.reduce((sum, patient) => sum + getInvoiceTotal(patient), 0);
   const paidTotal = visiblePatients.filter((patient) => patient.paid).reduce((sum, patient) => sum + getInvoiceTotal(patient), 0);
   const pendingTotal = total - paidTotal;
@@ -576,11 +574,7 @@ function TestsCatalog({ onToast, prices, canEdit }: { onToast: (message: string)
 function Reports({ patients, onPrintReport }: { patients: Patient[]; onPrintReport: (range: ReportRange) => void }) {
   const [range, setRange] = useState<ReportRange>("today");
   const currentDate = getClinicDateKey();
-  const currentMonth = currentDate.slice(0, 7);
-  const reportPatients = patients.filter((patient) => {
-    if (!patient.registeredDate) return true;
-    return range === "today" ? patient.registeredDate === currentDate : patient.registeredDate.startsWith(currentMonth);
-  });
+  const reportPatients = filterRecordsByReportRange(patients, range, currentDate);
   const paidPatients = reportPatients.filter((patient) => patient.paid);
   const testCounts = reportPatients.flatMap((patient) => patient.tests).reduce<Record<string, number>>((counts, code) => ({ ...counts, [code]: (counts[code] ?? 0) + 1 }), {});
   const totalTests = Object.values(testCounts).reduce((sum, count) => sum + count, 0);
