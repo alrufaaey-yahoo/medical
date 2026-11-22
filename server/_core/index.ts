@@ -14,6 +14,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
+import { canAccessLaboratory } from "./role-access";
+import { acceptBridgeHeartbeat, getBridgeConfig, getCbcBridgeStatus, getCbcSampleBySampleId, getLatestCbcSample, listCbcSamples, storeBridgeSample } from "../cbc-bridge";
 
 const REPORT_SELECT = {
   invoiceNumber: invoices.invoiceNumber,
@@ -50,6 +52,67 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  const authorizeLab = async (req: express.Request, res: express.Response) => {
+    let user = null;
+    try { user = await sdk.authenticateRequest(req); } catch { user = null; }
+    if (!user) { res.status(401).json({ error: "Authentication required" }); return false; }
+    if (!canAccessLaboratory(user.role)) { res.status(403).json({ error: "Laboratory access required" }); return false; }
+    return true;
+  };
+  const bridgeToken = (req: express.Request) => {
+    const value = req.get("authorization") ?? "";
+    return /^Bearer\s+/i.test(value) ? value.replace(/^Bearer\s+/i, "").trim() : "";
+  };
+  app.get("/api/cbc/health", async (req, res) => {
+    if (!await authorizeLab(req, res)) return;
+    try { res.json({ service: "cbc-bridge-api", status: await getCbcBridgeStatus() }); }
+    catch { res.status(503).json({ error: "CBC bridge status unavailable" }); }
+  });
+  app.get("/api/cbc/status", async (req, res) => {
+    if (!await authorizeLab(req, res)) return;
+    try { res.json(await getCbcBridgeStatus()); }
+    catch { res.status(503).json({ error: "CBC bridge status unavailable" }); }
+  });
+  app.get("/api/cbc/latest", async (req, res) => {
+    if (!await authorizeLab(req, res)) return;
+    try { res.json({ sample: await getLatestCbcSample() }); }
+    catch { res.status(503).json({ error: "CBC sample service unavailable" }); }
+  });
+  app.get("/api/cbc/samples", async (req, res) => {
+    if (!await authorizeLab(req, res)) return;
+    const requested = Number(req.query.limit ?? 50);
+    try { res.json({ samples: await listCbcSamples(Number.isInteger(requested) ? requested : 50) }); }
+    catch { res.status(503).json({ error: "CBC sample service unavailable" }); }
+  });
+  app.get("/api/cbc/samples/:sampleId", async (req, res) => {
+    if (!await authorizeLab(req, res)) return;
+    try {
+      const sample = await getCbcSampleBySampleId(req.params.sampleId);
+      if (!sample) { res.status(404).json({ error: "CBC sample not found" }); return; }
+      res.json({ sample });
+    } catch { res.status(503).json({ error: "CBC sample service unavailable" }); }
+  });
+  // The local bridge initiates all calls; no TCP instrument port is exposed by this web server.
+  app.get("/api/cbc/bridge/config", async (req, res) => {
+    const config = await getBridgeConfig(bridgeToken(req));
+    if (!config) { res.status(401).json({ error: "Bridge not configured or token invalid" }); return; }
+    res.set("Cache-Control", "no-store").json(config);
+  });
+  app.post("/api/cbc/bridge/heartbeat", async (req, res) => {
+    if (!await acceptBridgeHeartbeat(bridgeToken(req))) { res.status(401).json({ error: "Bridge not configured or token invalid" }); return; }
+    res.set("Cache-Control", "no-store").json({ accepted: true });
+  });
+  app.post("/api/cbc/bridge/ingest", async (req, res) => {
+    if (Buffer.byteLength(JSON.stringify(req.body ?? {}), "utf8") > 512_000) { res.status(413).json({ error: "CBC payload too large" }); return; }
+    try {
+      const result = await storeBridgeSample(bridgeToken(req), req.body);
+      if (!result.authorized) { res.status(401).json({ error: "Bridge not configured or token invalid" }); return; }
+      res.set("Cache-Control", "no-store").json({ accepted: true, duplicate: result.duplicate });
+    } catch {
+      // Intentionally do not log rejected HL7/result payloads or patient identifiers.
+      res.status(400).json({ error: "Invalid CBC sample payload" });
+    }
+  });
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   app.get("/api/platform/config.js", (_req, res) => {
     res.set("Cache-Control", "no-store").type("application/javascript").send(publicPlatformScript());

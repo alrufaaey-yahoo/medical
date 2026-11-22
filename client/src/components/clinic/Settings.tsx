@@ -2,6 +2,7 @@ import { AlertCircle, BadgeCheck, CalendarDays, ChevronDown, ShieldCheck, Plus, 
 import { useEffect, useState } from "react";
 import { isHttpsLogoUrl } from "@/lib/clinic-workflow";
 import { roleDescriptions, roleLabels, rolePermissions, type Role, type Shift } from "@/lib/clinic-types";
+import { CBCBridgeSettings } from "./CBCBridgeSettings";
 import { SectionTitle } from "./ui";
 
 export type ClinicSettingsDraft = {
@@ -95,6 +96,7 @@ export function Settings({ role, shift, setShift, settings, canSave, saving, onS
             </div>
             <p className="settings-readonly-note">تسلسل أرقام المرضى يُحسب على الخادم لكل وردية على حدة، ويُعاد ضبطه تلقائيًا عند أول تسجيل في وردية جديدة.</p>
           </div>
+          {role === "admin" && <CBCBridgeSettings />}
         </section>
 
         <aside className="settings-side">

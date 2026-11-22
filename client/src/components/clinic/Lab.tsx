@@ -1,7 +1,8 @@
-import { AlertCircle, BadgeCheck, Beaker, FlaskConical, Printer, Search, ShieldCheck, TestTube2, X } from "lucide-react";
+import { AlertCircle, BadgeCheck, Beaker, Download, FlaskConical, Printer, Search, ShieldCheck, TestTube2, X } from "lucide-react";
 import { useState } from "react";
 import type { ConsultationPrices } from "@shared/billing";
 import { flagResult, type LabTest } from "@/lib/catalog";
+import { applyCbcAnalyzerSample, CBC_ANALYZER_EXTRA_FIELDS, readCbcImportMetadata, type CbcAnalyzerSample } from "@/lib/cbc-import";
 import { formatSampleNumber, getConsultationType, initials } from "@/lib/clinic-utils";
 import type { FieldValue } from "@/lib/clinic-types";
 import type { OrderStatus, Patient, QueueStatus } from "@/lib/clinic-types";
@@ -33,10 +34,12 @@ function ResultField({ field, gender, value, onChange }: { field: LabTest["field
   );
 }
 
-export function Lab({ patients, catalog, prices, selectedPatientId, setSelectedPatientId, selectedTestCode, setSelectedTestCode, results, resultDraft, setResultDraft, onSaveResult, onPrintResult, onCollectSample, savingResult, collectingSample }: {
+export function Lab({ patients, catalog, prices, cbcEnabled, cbcConnection, selectedPatientId, setSelectedPatientId, selectedTestCode, setSelectedTestCode, results, resultDraft, setResultDraft, onSaveResult, onPrintResult, onCollectSample, savingResult, collectingSample }: {
   patients: Patient[];
   catalog: LabTest[];
   prices: ConsultationPrices;
+  cbcEnabled: boolean;
+  cbcConnection: "disabled" | "connected" | "receiving" | "disconnected";
   selectedPatientId: string;
   setSelectedPatientId: (id: string) => void;
   selectedTestCode: string;
@@ -53,6 +56,8 @@ export function Lab({ patients, catalog, prices, selectedPatientId, setSelectedP
   const labPatients = patients.filter(patient => patient.tests.length > 0);
   const [queueSearch, setQueueSearch] = useState("");
   const [queueStatus, setQueueStatus] = useState<QueueStatus>("all");
+  const [cbcImporting, setCbcImporting] = useState(false);
+  const [cbcImportFeedback, setCbcImportFeedback] = useState<{ text: string; error: boolean } | null>(null);
   const filteredLabPatients = labPatients.filter(patient => {
     const matchesSearch = `${patient.name} ${patient.id} ${patient.tests.join(" ")}`.toLowerCase().includes(queueSearch.trim().toLowerCase());
     const matchesStatus = queueStatus === "all" || (queueStatus === "paid" ? patient.paid : !patient.paid);
@@ -82,6 +87,38 @@ export function Lab({ patients, catalog, prices, selectedPatientId, setSelectedP
   const canEnterResult = selectedPatient.paid && selectedTestIsOrdered;
   const consultation = getConsultationType(selectedPatient);
   const groupedCbc = selectedTest.code === "CBC" && selectedTest.fields.length >= 15;
+  const extraCbcKeys = new Set(CBC_ANALYZER_EXTRA_FIELDS.map(field => field.key));
+  const standardCbcFields = selectedTest.fields.filter(field => !extraCbcKeys.has(field.key));
+  const extraCbcFields = selectedTest.fields.filter(field => extraCbcKeys.has(field.key));
+  const importedCbcMetadata = selectedTest.code === "CBC" ? readCbcImportMetadata(resultDraft.__cbc_import_metadata) : null;
+
+  const importLatestCbc = async () => {
+    setCbcImportFeedback(null);
+    setCbcImporting(true);
+    try {
+      const response = await fetch("/api/cbc/latest", { credentials: "same-origin", headers: { Accept: "application/json" } });
+      if (response.status === 401 || response.status === 403) throw new Error("لا توجد صلاحية لقراءة عينات CBC أو انتهت الجلسة.");
+      if (!response.ok) throw new Error("تعذر الاتصال بخدمة CBC؛ تحقق من حالة الجسر.");
+      const payload = await response.json() as { sample: CbcAnalyzerSample | null };
+      if (!payload.sample) {
+        setCbcImportFeedback({ text: "لا توجد عينات CBC مستلمة بعد.", error: false });
+        return;
+      }
+      const applied = applyCbcAnalyzerSample(selectedPatient.id, payload.sample, resultDraft, selectedTest.fields);
+      if (!applied.ok) {
+        setCbcImportFeedback({ text: `رفض الاستيراد: رقم المريض في العينة (${payload.sample.patientNumber}) لا يطابق المريض المحدد (${selectedPatient.id}). لم تُغيّر أي قيمة.`, error: true });
+        return;
+      }
+      setResultDraft(applied.values);
+      const detail = applied.unmapped.length ? `؛ رموز غير موجودة في النموذج: ${applied.unmapped.join(", ")}` : "";
+      const ambiguous = applied.ambiguous.length ? `؛ رموز متكررة لم تُملأ تلقائيًا: ${applied.ambiguous.join(", ")}` : "";
+      setCbcImportFeedback({ text: `نجح الاستيراد كمسودة من العينة ${payload.sample.sampleId}: تم ملء ${applied.filled.length} حقلًا فارغًا. لم يُحفظ التقرير ولم يُعتمد.${detail}${ambiguous}`, error: false });
+    } catch (error) {
+      setCbcImportFeedback({ text: error instanceof Error ? error.message : "حدث خطأ أثناء استيراد نتيجة CBC.", error: true });
+    } finally {
+      setCbcImporting(false);
+    }
+  };
 
   return (
     <div className="page-stack">
@@ -155,13 +192,27 @@ export function Lab({ patients, catalog, prices, selectedPatientId, setSelectedP
           </div>
           <div className="test-form-head">
             <div><span className="eyebrow">{selectedTest.category} · {selectedTest.sample}</span><h3>{selectedTest.name} <span>{selectedTest.english}</span></h3></div>
-            <span className="reference-note">المدى المرجعي يتبع {selectedPatient.gender}</span>
+            <div className="cbc-import-bar">
+              {selectedTest.code === "CBC" && cbcEnabled && <>
+                <span className={`cbc-import-status ${cbcConnection === "disconnected" ? "disconnected" : "connected"}`}><span className={cbcConnection === "receiving" ? "live-dot" : ""} />{cbcConnection === "receiving" ? "يستقبل بيانات" : cbcConnection === "connected" ? "متصل" : "غير متصل"}</span>
+                <button type="button" className="button button-soft" disabled={cbcImporting || !canEnterResult} onClick={() => void importLatestCbc()}><Download size={15} />{cbcImporting ? "جارٍ الاستيراد..." : "استيراد آخر نتيجة CBC"}</button>
+              </>}
+              <span className="reference-note">المدى المرجعي يتبع {selectedPatient.gender}</span>
+            </div>
           </div>
+          {selectedTest.code === "CBC" && cbcEnabled && <div className="cbc-import-tools" aria-live="polite">
+            {cbcImportFeedback && <span className={`cbc-import-feedback ${cbcImportFeedback.error ? "error" : ""}`}>{cbcImportFeedback.text}</span>}
+            {importedCbcMetadata && <>
+              <span className="cbc-import-feedback">مصدر المسودة: العينة {importedCbcMetadata.sampleId} · تاريخ التحليل {importedCbcMetadata.collectedAt || "غير محدد"} · رقم ملف الجهاز {importedCbcMetadata.patientNumber}</span>
+              <div className="cbc-import-details">{importedCbcMetadata.observations.map((item, index) => <span key={`${item.code}-${index}`}><b>{item.code}</b><span>{item.value || "—"}</span><span>{item.unit || "وحدة غير مذكورة"}</span><span>مرجع: {item.referenceRange || "غير مذكور"}</span><strong>{item.abnormalFlag || "—"}</strong></span>)}</div>
+            </>}
+          </div>}
           {groupedCbc ? (
             <div className="cbc-sections">
-              <div className="cbc-group"><h4>مؤشرات كريات الدم البيضاء</h4><div className="field-grid">{selectedTest.fields.slice(0, 6).map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>
-              <div className="cbc-group"><h4>مؤشرات كريات الدم الحمراء</h4><div className="field-grid">{selectedTest.fields.slice(6, 13).map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>
-              <div className="cbc-group"><h4>الصفائح الدموية</h4><div className="field-grid two-cols">{selectedTest.fields.slice(13).map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>
+              <div className="cbc-group"><h4>مؤشرات كريات الدم البيضاء</h4><div className="field-grid">{standardCbcFields.slice(0, 6).map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>
+              <div className="cbc-group"><h4>مؤشرات كريات الدم الحمراء</h4><div className="field-grid">{standardCbcFields.slice(6, 13).map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>
+              <div className="cbc-group"><h4>الصفائح الدموية</h4><div className="field-grid two-cols">{standardCbcFields.slice(13).map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>
+              {cbcEnabled && extraCbcFields.length > 0 && <div className="cbc-group cbc-extra-cbc-fields"><h4>مؤشرات إضافية من جهاز CBC</h4><div className="field-grid">{extraCbcFields.map(field => <ResultField key={field.key} field={field} gender={selectedPatient.gender} value={resultDraft[field.key] ?? ""} onChange={value => setResultDraft({ ...resultDraft, [field.key]: value })} />)}</div></div>}
               <label className="form-field full-field"><span>ملاحظات المختبر</span><textarea rows={3} value={resultDraft.remarks ?? ""} onChange={event => setResultDraft({ ...resultDraft, remarks: event.target.value })} placeholder="أضف ملاحظات فني المختبر هنا..." /></label>
             </div>
           ) : (

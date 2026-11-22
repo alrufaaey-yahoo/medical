@@ -461,3 +461,36 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 @media print {
   .notification-center, .team-communication-root { display: none !important; }
 }
+
+/* Optional CBC Analyzer integration */
+.cbc-bridge-settings { scroll-margin-top: 18px; }
+.cbc-bridge-form { margin-top: 14px; }
+.cbc-bridge-form select, .cbc-bridge-form input { min-width: 0; }
+.cbc-bridge-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
+.cbc-bridge-actions .button { min-height: 36px; }
+.cbc-bridge-meta, .cbc-bridge-health { display: flex; align-items: center; gap: 7px; color: #768990; font-size: 10px; margin: 13px 0 0; }
+.cbc-bridge-meta svg, .cbc-bridge-health svg { color: var(--teal); flex: 0 0 auto; }
+.cbc-bridge-help { display: grid; gap: 7px; margin-top: 15px; padding: 13px; border: 1px solid #e5eeee; border-radius: 9px; background: #fbfdfd; color: #73868c; font-size: 10px; line-height: 1.65; }
+.cbc-bridge-help strong { color: #335a63; font-size: 11px; }
+.cbc-bridge-help code, .cbc-token-reveal code { direction: ltr; text-align: left; overflow-wrap: anywhere; padding: 7px 9px; color: #42636b; background: #f0f6f5; border-radius: 6px; }
+.cbc-token-reveal { display: grid; gap: 8px; margin-top: 12px; padding: 13px; border: 1px solid #ead8a8; border-radius: 9px; color: #81652e; background: #fffaf0; font-size: 10px; }
+.cbc-token-reveal code { color: #5f4a20; background: #fff; border: 1px solid #f0e5c9; }
+.cbc-token-reveal .button { justify-self: start; }
+.cbc-import-tools { display: grid; gap: 8px; margin: 12px 21px 0; padding: 12px; border: 1px solid #dcefeb; border-radius: 9px; background: #f7fcfb; }
+.cbc-import-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cbc-import-bar .button { min-height: 34px; }
+.cbc-import-status { display: inline-flex; align-items: center; gap: 6px; color: #70858a; font-size: 10px; }
+.cbc-import-status.connected { color: #16796f; }
+.cbc-import-status.disconnected { color: #a07334; }
+.cbc-import-feedback { color: #3b746e; font-size: 10px; line-height: 1.6; }
+.cbc-import-feedback.error { color: #a34f58; }
+.cbc-import-details { display: grid; gap: 4px; max-height: 130px; overflow: auto; padding-top: 7px; border-top: 1px solid #e4efed; color: #7e8e92; font-size: 9px; }
+.cbc-import-details span { display: flex; gap: 7px; flex-wrap: wrap; }
+.cbc-import-details b { color: #436269; }
+.cbc-extra-cbc-fields { margin-top: 12px; }
+@media (max-width: 720px) {
+  .cbc-bridge-form { grid-template-columns: 1fr; }
+  .cbc-bridge-actions { display: grid; grid-template-columns: 1fr; }
+  .cbc-import-tools { margin-inline: 12px; }
+  .cbc-import-bar .button { width: 100%; justify-content: center; }
+}

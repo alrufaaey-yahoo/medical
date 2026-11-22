@@ -1,4 +1,5 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { isIP } from "node:net";
 import {
   CONSULTATION_LABELS,
   consultationFeeFor,
@@ -16,6 +17,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   clinicSettings,
+  cbcBridgeConfig,
   invoiceAdjustments,
   invoiceItems,
   invoices,
@@ -50,6 +52,7 @@ import { sdk } from "./_core/sdk";
 import { sumInvoiceItems, toInvoiceNumber, toPatientNumber, uniqueTestCodes } from "./medical-workflow";
 import { buildOperationalReport, getReportWindow, getShiftWindow } from "./operational-reports";
 import { diffCatalogPrices, diffConsultationPrices, normalizePrice } from "./pricing";
+import { getCbcBridgeSettings, getCbcBridgeStatus, rotateCbcBridgeToken, updateCbcBridgeSettings } from "./cbc-bridge";
 
 const patientInput = z.object({
   name: z.string().trim().min(2).max(180),
@@ -1049,6 +1052,24 @@ export const appRouter = router({
         return { updated: changes.length, unchanged: codes.length - changes.length } as const;
       });
     }),
+  }),
+
+  cbcBridge: router({
+    /** Device network settings and whether a one-time token exists; admin only. */
+    settings: adminProcedure.query(async () => getCbcBridgeSettings()),
+    status: roleProcedure("lab").query(async () => getCbcBridgeStatus()),
+    update: adminProcedure.input(z.object({
+      enabled: z.boolean(),
+      mode: z.enum(["local", "hosted"]),
+      deviceIp: z.string().trim().min(1).max(45).refine(value => isIP(value) !== 0, "عنوان الجهاز يجب أن يكون IP صالحًا"),
+      computerIp: z.string().trim().min(1).max(45).refine(value => isIP(value) !== 0, "عنوان الحاسوب يجب أن يكون IP صالحًا"),
+      listenPort: z.number().int().min(1024).max(65535),
+      protocol: z.enum(["mllp", "raw-idle"]),
+      transSelect: z.string().trim().min(1).max(32),
+      autoTrans: z.boolean(),
+      subnet: z.string().trim().min(7).max(45).refine(value => isIP(value) === 4, "قناع الشبكة يجب أن يكون IPv4 صالحًا"),
+    })).mutation(async ({ input }) => updateCbcBridgeSettings(input)),
+    rotateToken: adminProcedure.mutation(async () => rotateCbcBridgeToken()),
   }),
 });
 

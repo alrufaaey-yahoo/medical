@@ -21,6 +21,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONSULTATION_PRICES, type ConsultationType } from "@shared/billing";
 import { trpc } from "@/lib/trpc";
 import { buildCatalog, DEFAULT_CATALOG, type LabTest } from "@/lib/catalog";
+import { CBC_ANALYZER_EXTRA_FIELDS } from "@/lib/cbc-import";
 import {
   formatClinicDate,
   formatClinicTime,
@@ -117,6 +118,11 @@ export default function Home() {
   const catalogQuery = trpc.catalog.list.useQuery(undefined, { staleTime: 5 * 60 * 1000, retry: false });
   const pricingQuery = trpc.pricing.get.useQuery(undefined, { staleTime: 5 * 60 * 1000, retry: false });
   const clinicQuery = trpc.clinic.getSettings.useQuery(undefined, { staleTime: 5 * 60 * 1000, retry: false });
+  const cbcStatusQuery = trpc.cbcBridge.status.useQuery(undefined, {
+    enabled: operationalRole === "admin" || operationalRole === "lab",
+    retry: false,
+    refetchInterval: 30_000,
+  });
   const paymentBanksQuery = trpc.clinic.listPaymentBanks.useQuery(undefined, { enabled: operationalRole === "admin" || operationalRole === "cashier", retry: false });
   const currentShiftInput = useMemo(() => ({ shiftDate: getClinicShiftDateKey(), shiftType: serverShiftByLabel[shift] }), [shift]);
   const currentShiftQuery = trpc.shifts.current.useQuery(currentShiftInput, { enabled: Boolean(operationalRole), retry: false });
@@ -136,7 +142,13 @@ export default function Home() {
   const saveSettingsMutation = trpc.clinic.saveSettings.useMutation();
   const openedShiftKey = useRef("");
 
-  const catalog = useMemo<LabTest[]>(() => (catalogQuery.data?.length ? buildCatalog(catalogQuery.data) : DEFAULT_CATALOG), [catalogQuery.data]);
+  const baseCatalog = useMemo<LabTest[]>(() => (catalogQuery.data?.length ? buildCatalog(catalogQuery.data) : DEFAULT_CATALOG), [catalogQuery.data]);
+  const catalog = useMemo<LabTest[]>(() => {
+    if (!cbcStatusQuery.data?.enabled) return baseCatalog;
+    return baseCatalog.map(test => test.code === "CBC"
+      ? { ...test, fields: [...test.fields, ...CBC_ANALYZER_EXTRA_FIELDS.filter(extra => !test.fields.some(field => field.key === extra.key))] }
+      : test);
+  }, [baseCatalog, cbcStatusQuery.data?.enabled]);
   const prices = pricingQuery.data ?? DEFAULT_CONSULTATION_PRICES;
 
   const derived = useMemo(() => {
@@ -325,6 +337,8 @@ export default function Home() {
 
   useEffect(() => {
     if (effectiveRole !== "lab" || !selectedLabOrderId || !dirtyDraftKeys.current.has(selectedDraftKey)) return;
+    // Imported CBC data remains a screen draft until the technician explicitly saves it.
+    if (resultDraft.__cbc_import_metadata) return;
     const revision = draftRevisions.current.get(selectedDraftKey) ?? 0;
     const timer = window.setTimeout(() => {
       draftMutation.mutate({ labOrderId: selectedLabOrderId, values: resultDraft, remarks: resultDraft.remarks }, {
@@ -540,7 +554,7 @@ export default function Home() {
       return <Billing patients={billingPatients} catalog={catalog} prices={prices} banks={(paymentBanksQuery.data ?? []).map(bank => ({ id: bank.id, name: bank.name }))} onAddPatient={() => setShowPatientDialog(true)} onAddInvoice={() => openExistingInvoice()} onPrintInvoice={patient => triggerPrint("invoice", patient)} onEditInvoice={patient => patient.databaseInvoiceId && setEditorInvoiceId(patient.databaseInvoiceId)} onMarkPaid={handleMarkPaid} onCancel={handleCancelInvoice} onRefund={handleRefundInvoice} saving={paymentMutation.isPending || cancelMutation.isPending || refundMutation.isPending || followUpMutation.isPending} canManage={effectiveRole === "admin" || effectiveRole === "cashier"} />;
     }
     if (activeSection === "lab") {
-      return <Lab patients={patients} catalog={catalog} prices={prices} selectedPatientId={selectedPatient.id} setSelectedPatientId={id => {
+      return <Lab patients={patients} catalog={catalog} prices={prices} cbcEnabled={Boolean(cbcStatusQuery.data?.enabled)} cbcConnection={cbcStatusQuery.data?.connection ?? "disconnected"} selectedPatientId={selectedPatient.id} setSelectedPatientId={id => {
         setSelectedPatientId(id);
         const nextCode = patients.find(patient => patient.id === id)?.tests[0] ?? catalog[0]?.code ?? "";
         setSelectedTestCode(nextCode);

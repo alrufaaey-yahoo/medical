@@ -33,6 +33,37 @@ export const clinicSettings = mysqlTable("clinic_settings", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Optional analyzer bridge configuration; the singleton row is id=1 and tokenHash is never returned. */
+export const cbcBridgeConfig = mysqlTable("cbc_bridge_config", {
+  id: int("id").primaryKey(),
+  enabled: int("enabled").default(0).notNull(),
+  mode: mysqlEnum("mode", ["local", "hosted"]).default("local").notNull(),
+  deviceIp: varchar("deviceIp", { length: 45 }).default("192.168.1.100").notNull(),
+  computerIp: varchar("computerIp", { length: 45 }).default("192.168.1.111").notNull(),
+  listenPort: int("listenPort").default(5006).notNull(),
+  protocol: mysqlEnum("protocol", ["mllp", "raw-idle"]).default("mllp").notNull(),
+  transSelect: varchar("transSelect", { length: 32 }).default("Net").notNull(),
+  autoTrans: int("autoTrans").default(1).notNull(),
+  subnet: varchar("subnet", { length: 45 }).default("255.255.255.0").notNull(),
+  tokenHash: varchar("tokenHash", { length: 64 }),
+  lastHeartbeat: timestamp("lastHeartbeat"),
+  lastMessageAt: timestamp("lastMessageAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Analyzer results are staged as samples and never create or complete a lab result by themselves. */
+export const cbcBridgeSamples = mysqlTable("cbc_bridge_samples", {
+  id: int("id").autoincrement().primaryKey(),
+  sampleId: varchar("sampleId", { length: 128 }).notNull(),
+  patientNumber: varchar("patientNumber", { length: 64 }).notNull(),
+  collectedAt: varchar("collectedAt", { length: 40 }),
+  messageControlId: varchar("messageControlId", { length: 128 }).notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull().unique(),
+  resultsJson: text("resultsJson").notNull(),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+}, (table) => [index("cbc_bridge_samples_sample_idx").on(table.sampleId), index("cbc_bridge_samples_received_idx").on(table.receivedAt)]);
+
 export const shifts = mysqlTable("shifts", {
   id: int("id").autoincrement().primaryKey(),
   shiftDate: varchar("shiftDate", { length: 10 }).notNull(),
