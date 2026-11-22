@@ -76,6 +76,16 @@ const clinicInput = z.object({
   footerText: z.string().trim().max(1000).optional(),
 });
 
+const setupInput = z.object({
+  clinic: clinicInput,
+  admin: z.object({
+    name: z.string().trim().min(2).max(180),
+    username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9._-]+$/, "اسم المستخدم يقبل الحروف الإنجليزية والأرقام والنقطة والشرطة فقط").transform(value => value.toLowerCase()),
+    password: z.string().min(8).max(128),
+  }),
+  pricing: z.object({ generalPrice: z.number().int().min(0).max(100000000), specialistPrice: z.number().int().min(0).max(100000000) }),
+});
+
 const resultInput = z.object({
   labOrderId: z.number().int().positive(),
   values: z.record(z.string(), z.string()),
@@ -160,6 +170,42 @@ type InvoiceEditResult = {
 
 export const appRouter = router({
   system: systemRouter,
+  setup: router({
+    status: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return { required: false, databaseAvailable: false } as const;
+      const [settings] = await db.select({ id: clinicSettings.id }).from(clinicSettings).limit(1);
+      const [admin] = await db.select({ id: users.id }).from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).where(and(eq(users.role, "admin"), eq(localLoginAccounts.active, 1))).limit(1);
+      return { required: !settings || !admin, databaseAvailable: true } as const;
+    }),
+    complete: publicProcedure.input(setupInput).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const passwordHash = await hashLocalPassword(input.admin.password);
+      const openId = `local_${randomBytes(20).toString("hex")}`;
+      try {
+        return await db.transaction(async tx => {
+          const [existingSettings] = await tx.select({ id: clinicSettings.id }).from(clinicSettings).limit(1).for("update");
+          const [existingAdmin] = await tx.select({ id: users.id }).from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).where(and(eq(users.role, "admin"), eq(localLoginAccounts.active, 1))).limit(1).for("update");
+          if (existingSettings && existingAdmin) throw new TRPCError({ code: "CONFLICT", message: "تمت تهيئة النظام مسبقًا. أعد تحميل الصفحة لتسجيل الدخول." });
+          const [duplicateUsername] = await tx.select({ id: users.id }).from(users).where(eq(users.username, input.admin.username)).limit(1);
+          if (duplicateUsername) throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل" });
+          if (existingSettings) await tx.update(clinicSettings).set({ ...input.clinic, consultationGeneralPrice: input.pricing.generalPrice, consultationSpecialistPrice: input.pricing.specialistPrice }).where(eq(clinicSettings.id, existingSettings.id));
+          else await tx.insert(clinicSettings).values({ ...input.clinic, consultationGeneralPrice: input.pricing.generalPrice, consultationSpecialistPrice: input.pricing.specialistPrice });
+          await tx.insert(users).values({ openId, name: input.admin.name, username: input.admin.username, loginMethod: "local-password", role: "admin" });
+          const [createdAdmin] = await tx.select({ id: users.id }).from(users).where(eq(users.openId, openId)).limit(1);
+          if (!createdAdmin) throw new Error("تعذر إنشاء حساب المدير");
+          await tx.insert(localLoginAccounts).values({ userId: createdAdmin.id, passwordHash, createdBy: createdAdmin.id, active: 1 });
+          await tx.insert(paymentBanks).values([{ name: "بنكك" }, { name: "أوكاش" }, { name: "فوري" }]).onDuplicateKeyUpdate({ set: { active: 1 } });
+          return { success: true } as const;
+        });
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "ER_DUP_ENTRY") throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل" });
+        throw error;
+      }
+    }),
+  }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user ?? null),
     namedAccounts: publicProcedure.query(async () => {

@@ -55,6 +55,7 @@ const Reports = lazy(() => import("@/components/clinic/Reports").then(module => 
 const Settings = lazy(() => import("@/components/clinic/Settings").then(module => ({ default: module.Settings })));
 const TeamPanel = lazy(() => import("@/components/clinic/Team").then(module => ({ default: module.TeamPanel })));
 const AccountSettingsDialog = lazy(() => import("@/components/clinic/Team").then(module => ({ default: module.AccountSettingsDialog })));
+const SetupWizard = lazy(() => import("@/components/clinic/SetupWizard").then(module => ({ default: module.SetupWizard })));
 
 type NavItem = { id: Section; label: string; icon: LucideIcon };
 
@@ -112,6 +113,7 @@ export default function Home() {
   const [printReportRange, setPrintReportRange] = useState<ReportRange>("today");
 
   const authQuery = trpc.auth.me.useQuery(undefined, { retry: false });
+  const setupQuery = trpc.setup.status.useQuery(undefined, { retry: false, staleTime: 0 });
   const queryClient = useQueryClient();
   const resetSessionView = async () => {
     setActiveSection("overview");
@@ -604,6 +606,14 @@ export default function Home() {
 
   if (authQuery.isLoading) {
     return <div className="app-splash"><AppLogo /><span>جارٍ التحقق من جلسة الدخول...</span></div>;
+  }
+
+  if (setupQuery.isLoading) {
+    return <div className="app-splash"><AppLogo /><span>جارٍ التحقق من تهيئة المستوصف...</span></div>;
+  }
+
+  if (setupQuery.data?.required) {
+    return <Suspense fallback={<div className="app-splash"><AppLogo /><span>جارٍ تحميل شاشة التهيئة...</span></div>}><SetupWizard onCompleted={() => { void setupQuery.refetch(); void authQuery.refetch(); }} /></Suspense>;
   }
 
   if (!authQuery.data || !operationalRole) {
