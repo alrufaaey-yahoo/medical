@@ -3,6 +3,9 @@
  * prices an operator has already changed.
  */
 import "dotenv/config";
+import { randomBytes } from "node:crypto";
+import { chmod, writeFile } from "node:fs/promises";
+import path from "node:path";
 import mysql from "mysql2/promise";
 import { DEFAULT_CATALOG } from "../client/src/lib/catalog";
 import { hashLocalPassword } from "../server/local-auth";
@@ -27,12 +30,22 @@ if ((defaultAccounts as unknown[]).length === 0 && (existingAdmins as unknown[])
     const [createdUsers] = await connection.execute("SELECT id FROM users WHERE openId = ? LIMIT 1", [openId]);
     const userId = (createdUsers as Array<{ id: number }>)[0]?.id;
     if (!userId) throw new Error("تعذر إنشاء حساب المدير الافتراضي");
+    const bootstrapPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD || randomBytes(24).toString("base64url");
+    if (bootstrapPassword.length < 12) throw new Error("BOOTSTRAP_ADMIN_PASSWORD يجب أن تكون 12 محرفًا على الأقل");
     await connection.execute(
       "INSERT INTO local_login_accounts (userId, passwordHash, active, createdBy) VALUES (?, ?, 1, ?)",
-      [userId, await hashLocalPassword("123456"), userId],
+      [userId, await hashLocalPassword(bootstrapPassword), userId],
     );
+    await connection.execute("UPDATE local_login_accounts SET mustChangePassword = 1 WHERE userId = ?", [userId]);
     await connection.commit();
-    console.log("created the one-time default administrator account");
+    if (!process.env.BOOTSTRAP_ADMIN_PASSWORD) {
+      const outputPath = path.join("/home/ubuntu", `.medical-bootstrap-${process.env.MANUS_PROJECT_ID || "local"}`);
+      await writeFile(outputPath, `${bootstrapPassword}\n`, { mode: 0o600, flag: "wx" });
+      await chmod(outputPath, 0o600);
+      console.log(`تم إنشاء حساب bootstrap وحفظ كلمة المرور مرة واحدة في ${outputPath}`);
+    } else {
+      console.log("تم إنشاء حساب bootstrap من secret محمي");
+    }
   } catch (error) {
     await connection.rollback();
     throw error;
