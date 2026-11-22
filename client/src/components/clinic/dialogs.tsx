@@ -349,7 +349,7 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
                 ))}
               </div>
               {selectedRole && <form className="preview-login-form" onSubmit={previewLogin}>
-                <label className="form-field full-field"><span>كلمة مرور {roleLabels[selectedRole]}</span><input autoComplete="current-password" autoFocus type="password" minLength={8} maxLength={128} required value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور الخاصة بهذا الدور" /></label>
+                <label className="form-field full-field"><span>كلمة مرور {roleLabels[selectedRole]}</span><input autoComplete="current-password" autoFocus type="password" minLength={6} maxLength={128} required value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور الخاصة بهذا الدور" /></label>
                 <button className="button button-primary full-width" type="submit" disabled={previewMutation.isPending || !password}>{previewMutation.isPending ? "جارٍ التحقق..." : `دخول ${roleLabels[selectedRole]}`}</button>
               </form>}
               <p className="login-note">كل دور يستخدم كلمة مرور مستقلة، وتُحفظ كلمات المرور على شكل تجزئات آمنة في قاعدة المعاينة فقط. حسابات الاختبار معطلة في الإنتاج.</p>
