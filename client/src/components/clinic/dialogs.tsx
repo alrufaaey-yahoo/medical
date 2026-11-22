@@ -17,7 +17,7 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { CONSULTATION_LABELS, consultationFeeFor, type ConsultationPrices, type ConsultationType } from "@shared/billing";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
@@ -296,6 +296,8 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
   const previewQuery = trpc.auth.previewAvailable.useQuery(undefined, { retry: false });
   const previewMutation = trpc.auth.previewLogin.useMutation();
   const [error, setError] = useState("");
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [password, setPassword] = useState("");
   const roles: Role[] = ["admin", "supervisor", "cashier", "lab"];
 
   const officialLogin = () => {
@@ -306,10 +308,13 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
     }
   };
 
-  const previewLogin = (role: Role) => {
-    previewMutation.mutate({ role }, {
+  const previewLogin = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedRole) return;
+    setError("");
+    previewMutation.mutate({ role: selectedRole, password }, {
       onSuccess: () => {
-        onToast(`تم الدخول بصلاحية ${roleLabels[role]}`);
+        onToast(`تم الدخول بصلاحية ${roleLabels[selectedRole]}`);
         window.setTimeout(() => window.location.reload(), 300);
       },
       onError: mutationError => setError(mutationError.message || "تعذر تفعيل دخول المعاينة"),
@@ -325,26 +330,32 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
           <div className="login-symbol"><ShieldCheck size={29} /></div>
           <span className="eyebrow">دخول آمن للمستوصف</span>
           <h2>اختر طريقة الدخول</h2>
-          <p>سجّل الدخول بحساب Manus الرسمي، أو استخدم دخول المعاينة لمراجعة صلاحيات كل دور على قاعدة البيانات الفعلية.</p>
+          <p>اختر حسابًا تجريبيًا للدور المطلوب، أو سجّل الدخول بحساب Manus الرسمي.</p>
         </div>
         <div className="modal-body login-body">
           <button className="button button-primary full-width login-main-action" onClick={officialLogin}><LogIn size={17} />الدخول الموحد عبر Manus</button>
           {error && <div className="login-error"><AlertCircle size={15} />{error}</div>}
+          {previewQuery.isLoading && <p className="login-note">جارٍ تحميل خيارات الدخول التجريبية...</p>}
+          {previewQuery.isError && <div className="login-error"><AlertCircle size={15} />تعذر تحميل خيارات الدخول. أعد المحاولة أو استخدم الدخول الموحد عبر Manus.</div>}
           {previewQuery.data?.enabled && (
             <>
-              <div className="login-divider"><span>دخول المعاينة بالصلاحية</span></div>
+              <div className="login-divider"><span>حسابات الاختبار المحمية بكلمة مرور</span></div>
               <div className="demo-role-grid">
                 {roles.map(role => (
-                  <button key={role} disabled={previewMutation.isPending} onClick={() => previewLogin(role)}>
+                  <button type="button" key={role} aria-pressed={selectedRole === role} className={selectedRole === role ? "selected" : ""} disabled={previewMutation.isPending} onClick={() => { setSelectedRole(role); setPassword(""); setError(""); }}>
                     <span className="demo-role-icon"><ShieldCheck size={16} /></span>
-                    <span><strong>{roleLabels[role]}</strong><small>{roleDescriptions[role]}</small></span>
+                    <span><strong>الدخول كـ {roleLabels[role]}</strong><small>{roleDescriptions[role]}</small></span>
                   </button>
                 ))}
               </div>
-              <p className="login-note">دخول المعاينة يفعّل جلسة حقيقية على قاعدة البيانات، ويحفظ كل إجراء باسم الحساب التجريبي. عطّله بإزالة ALLOW_PREVIEW_LOGIN من بيئة الإنتاج.</p>
+              {selectedRole && <form className="preview-login-form" onSubmit={previewLogin}>
+                <label className="form-field full-field"><span>كلمة مرور {roleLabels[selectedRole]}</span><input autoComplete="current-password" autoFocus type="password" minLength={8} maxLength={128} required value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور الخاصة بهذا الدور" /></label>
+                <button className="button button-primary full-width" type="submit" disabled={previewMutation.isPending || !password}>{previewMutation.isPending ? "جارٍ التحقق..." : `دخول ${roleLabels[selectedRole]}`}</button>
+              </form>}
+              <p className="login-note">كل دور يستخدم كلمة مرور مستقلة، وتُحفظ كلمات المرور على شكل تجزئات آمنة في قاعدة المعاينة فقط. حسابات الاختبار معطلة في الإنتاج.</p>
             </>
           )}
-          {previewQuery.isSuccess && !previewQuery.data.enabled && <p className="login-note">دخول المعاينة غير مفعّل في هذه البيئة. استخدم حساب Manus الرسمي.</p>}
+          {previewQuery.isSuccess && !previewQuery.data.enabled && <p className="login-note">حسابات الاختبار غير مفعّلة في هذه البيئة. استخدم حساب Manus الرسمي.</p>}
         </div>
       </div>
     </div>

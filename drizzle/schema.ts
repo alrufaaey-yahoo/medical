@@ -12,6 +12,12 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const previewLoginAccounts = mysqlTable("preview_login_accounts", {
+  role: mysqlEnum("role", ["admin", "supervisor", "cashier", "lab"]).primaryKey(),
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const clinicSettings = mysqlTable("clinic_settings", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 180 }).notNull(),

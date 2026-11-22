@@ -174,6 +174,10 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .demo-role-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .demo-role-grid button { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 11px; text-align: right; color: #536d72; background: #fbfdfd; border: 1px solid #e3edeb; border-radius: 10px; cursor: pointer; }
 .demo-role-grid button.active { color: #176d68; background: #ecfaf7; border-color: #94d9cd; box-shadow: 0 0 0 2px rgba(44,145,133,.08); }
+.demo-role-grid button.selected { color: #176d68; background: #ecfaf7; border-color: #49b3a5; box-shadow: 0 0 0 2px rgba(44,145,133,.12); }
+.preview-login-form { display: grid; gap: 12px; margin-top: 16px; }
+.preview-login-form input { width: 100%; min-height: 42px; padding: 9px 12px; color: #24444b; background: #fff; border: 1px solid #dce8e6; border-radius: 9px; }
+.preview-login-form input:focus { outline: 2px solid rgba(44,145,133,.24); border-color: #2c9185; }
 .demo-role-icon { display: grid; place-items: center; flex: 0 0 29px; width: 29px; height: 29px; color: #277d76; background: #e5f5f1; border-radius: 8px; }
 .demo-role-grid button > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .demo-role-grid strong { font-size: 11px; }

@@ -30,9 +30,11 @@ import {
   shifts,
   staffMembers,
   staffMessages,
+  previewLoginAccounts,
   userShiftAssignments,
   users,
 } from "../drizzle/schema";
+import { verifyPreviewPassword } from "./_core/preview-auth";
 import { getDb } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -157,18 +159,20 @@ export const appRouter = router({
       return { success: true } as const;
     }),
     previewAvailable: publicProcedure.query(() => ({ enabled: isPreviewLoginEnabled() })),
-    /**
-     * Preview-only sign in. Disabled unless ALLOW_PREVIEW_LOGIN=1 is set on an
-     * environment without Manus OAuth (see server/_core/preview-auth.ts).
-     */
+    /** Preview-only password sign-in for isolated test accounts. */
     previewLogin: publicProcedure.input(z.object({
       role: z.enum(["admin", "supervisor", "cashier", "lab"]),
+      password: z.string().min(8).max(128),
     })).mutation(async ({ input, ctx }) => {
       if (!isPreviewLoginEnabled()) {
         throw new TRPCError({ code: "FORBIDDEN", message: "الدخول التجريبي غير مفعّل في هذه البيئة" });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [account] = await db.select().from(previewLoginAccounts).where(eq(previewLoginAccounts.role, input.role)).limit(1);
+      if (!account || !verifyPreviewPassword(input.password, account.passwordHash)) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "كلمة المرور غير صحيحة لهذا الدور" });
+      }
       const openId = `preview-${input.role}`;
       await db.insert(users).values({
         openId,
