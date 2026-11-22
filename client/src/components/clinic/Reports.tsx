@@ -29,6 +29,9 @@ type ReportRow = {
 };
 
 type ReportView = {
+  shiftOwnerName?: string | null;
+  shiftLabName?: string | null;
+  reportGeneratedByName?: string | null;
   issuedCount: number;
   issuedTotal: number;
   collectedCount: number;
@@ -236,6 +239,16 @@ export function Reports({ patients, catalog, prices, hasSession, canDownloadPdf,
         </div>
         <span className="muted-line">{tab === "period" ? `التقرير ${PERIOD_LABEL[period]} · ${formatClinicDateFromKey(date)}` : `وردية ${SHIFT_LABELS[shiftType]} · ${formatClinicDateFromKey(date)}`}</span>
       </section>
+      {(() => {
+        const activeReport = tab === "shift" ? shiftReport : report;
+        if (!activeReport) return null;
+        const identity = [
+          activeReport.shiftOwnerName ? `صاحب الوردية: ${activeReport.shiftOwnerName}` : null,
+          activeReport.shiftLabName ? `المختبر: ${activeReport.shiftLabName}` : null,
+          activeReport.reportGeneratedByName ? `أصدر التقرير: ${activeReport.reportGeneratedByName}` : null,
+        ].filter((item): item is string => Boolean(item));
+        return identity.length ? <div className="report-meta-strip">{identity.map(item => <span key={item}>{item}</span>)}</div> : null;
+      })()}
 
       {hasSession && (tab === "period" ? summaryQuery.isError : shiftQuery.isError && shiftQuery.error?.data?.code !== "FORBIDDEN") && (
         <div className="panel empty-state"><AlertCircle size={22} /><strong>تعذر تحميل التقرير</strong><span>{tab === "period" ? summaryQuery.error?.message : shiftQuery.error?.message}</span></div>

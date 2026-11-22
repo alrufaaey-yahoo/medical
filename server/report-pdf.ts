@@ -91,8 +91,14 @@ export async function renderOperationalReportPdfWithPdfKit(report: OperationalRe
     doc.fillColor("#536970").fontSize(10)
       .text(`الفترة: ${formatReportPeriod(report)} · المنطقة الزمنية: الخرطوم`, LEFT, 91, { width: CONTENT_WIDTH, align: "right" });
     const contact = [branding.clinicAddress, branding.clinicPhone, branding.clinicWebsite].filter(Boolean).map(value => safeText(value, 120)).join(" · ");
-    if (contact) doc.fillColor("#6d7e82").fontSize(8).text(contact, LEFT, 104, { width: CONTENT_WIDTH, align: "right" });
-    doc.moveTo(LEFT, contact ? 124 : 112).lineTo(PAGE_WIDTH - LEFT, contact ? 124 : 112).strokeColor("#d7e5e3").stroke();
+    const reportMeta = [
+      report.shiftOwnerName ? `صاحب الوردية: ${safeText(report.shiftOwnerName, 80)}` : null,
+      report.shiftLabName ? `المختبر: ${safeText(report.shiftLabName, 80)}` : null,
+      report.reportGeneratedByName ? `أصدر التقرير: ${safeText(report.reportGeneratedByName, 80)}` : null,
+    ].filter(Boolean).join(" · ");
+    const headerMeta = [contact, reportMeta].filter(Boolean).join(" · ");
+    if (headerMeta) doc.fillColor("#6d7e82").fontSize(8).text(headerMeta, LEFT, 104, { width: CONTENT_WIDTH, align: "right" });
+    doc.moveTo(LEFT, headerMeta ? 124 : 112).lineTo(PAGE_WIDTH - LEFT, headerMeta ? 124 : 112).strokeColor("#d7e5e3").stroke();
   };
 
   drawPageHeader();

@@ -82,6 +82,11 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
     branding.clinicPhone ? `<span dir="ltr">${safeText(branding.clinicPhone, 120)}</span>` : null,
     branding.clinicWebsite ? `<span dir="ltr">${safeText(branding.clinicWebsite, 120)}</span>` : null,
   ].filter(Boolean).join(" · ");
+  const reportMeta = [
+    report.shiftOwnerName ? `صاحب الوردية: ${safeText(report.shiftOwnerName, 80)}` : null,
+    report.shiftLabName ? `المختبر: ${safeText(report.shiftLabName, 80)}` : null,
+    report.reportGeneratedByName ? `أصدر التقرير: ${safeText(report.reportGeneratedByName, 80)}` : null,
+  ].filter(Boolean).join(" · ");
   const payments = report.paymentBreakdown.length
     ? report.paymentBreakdown.map(row => `${safeText(row.method, 24)}: ${row.count} (${formatMoney(row.total)})`).join(" · ")
     : "لا توجد تحصيلات مسجلة";
@@ -114,6 +119,7 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
   .title { font-size: 13pt; color: #1a7a75; margin: 2px 0 0; }
   .period { font-size: 9.5pt; color: #52696f; margin-top: 2px; }
   .contact { font-size: 8pt; color: #7b8c90; margin-top: 1px; }
+  .meta { font-size: 8pt; color: #52696f; margin-top: 2px; }
   .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 9px 0 6px; }
   .card { background: #f1f7f6; border-radius: 5px; padding: 7px 6px; text-align: center; }
   .card span { display: block; color: #5a7178; font-size: 8pt; }
@@ -138,6 +144,7 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
     <p class="title">${safeText(reportPeriodTitle(report), 90)}</p>
     <p class="period">الفترة: ${safeText(formatReportPeriod(report), 90)} · المنطقة الزمنية: الخرطوم</p>
     ${contact ? `<p class="contact">${contact}</p>` : ""}
+    ${reportMeta ? `<p class="meta">${reportMeta}</p>` : ""}
   </div>
   <div class="cards">${cards.map(card => `<div class="card"><span>${card.label}</span><strong>${card.value}</strong></div>`).join("")}</div>
   <p class="note">المعاينات: ${report.consultationCount} (عمومي ${report.consultationGeneralCount} · اختصاصي ${report.consultationSpecialistCount}). جميع المبالغ بالجنيه السوداني.</p>

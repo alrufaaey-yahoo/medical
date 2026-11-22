@@ -989,7 +989,7 @@ export const appRouter = router({
     summary: roleProcedure("supervisor").input(z.object({
       period: z.enum(["daily", "weekly", "monthly"]),
       date: clinicDate,
-    })).query(async ({ input }) => {
+    })).query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const window = getReportWindow(input.period, input.date);
@@ -1031,7 +1031,9 @@ export const appRouter = router({
           ))
           .orderBy(desc(invoices.paidAt)),
       ]);
-      return buildOperationalReport(window, issuedRows, collectedRows);
+      return buildOperationalReport(window, issuedRows, collectedRows, {
+        reportGeneratedByName: ctx.user.name,
+      });
     }),
     shift: roleProcedure("cashier", "supervisor").input(z.object({
       shiftDate: clinicDate,
@@ -1043,7 +1045,12 @@ export const appRouter = router({
       const [shift] = await db.select().from(shifts)
         .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
         .limit(1);
-      if (!shift) return { shift: null, report: buildOperationalReport(window, [], []) };
+      if (!shift) {
+        return {
+          shift: null,
+          report: buildOperationalReport(window, [], [], { reportGeneratedByName: ctx.user.name }),
+        };
+      }
       if (ctx.user.role === "cashier") {
         const [assigned] = await db.select({ id: userShiftAssignments.id }).from(userShiftAssignments)
           .where(and(eq(userShiftAssignments.shiftId, shift.id), eq(userShiftAssignments.userId, ctx.user.id))).limit(1);
@@ -1068,7 +1075,19 @@ export const appRouter = router({
       }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id)).leftJoin(users, eq(invoices.createdBy, users.id))
         .where(eq(invoices.shiftId, shift.id))
         .orderBy(desc(invoices.createdAt));
-      return { shift, report: buildOperationalReport(window, rows, rows) };
+      const staffIds = [shift.cashierUserId, shift.labUserId].filter((id): id is number => id != null);
+      const staffRows = staffIds.length
+        ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, staffIds))
+        : [];
+      const staffById = new Map(staffRows.map(row => [row.id, row.name]));
+      return {
+        shift,
+        report: buildOperationalReport(window, rows, rows, {
+          shiftOwnerName: shift.cashierUserId ? staffById.get(shift.cashierUserId) : null,
+          shiftLabName: shift.labUserId ? staffById.get(shift.labUserId) : null,
+          reportGeneratedByName: ctx.user.name,
+        }),
+      };
     }),
   }),
 

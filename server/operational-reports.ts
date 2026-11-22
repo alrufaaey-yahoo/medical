@@ -31,8 +31,16 @@ export type ReportInvoiceRow = {
 
 export type PaymentBreakdownRow = { method: string; count: number; total: number };
 export type NetCollectionBreakdownRow = { service: "معاينة" | "مختبر"; method: string; total: number };
+export type ReportMetadata = {
+  shiftOwnerName?: string | null;
+  shiftLabName?: string | null;
+  reportGeneratedByName?: string | null;
+};
 
 export type OperationalReport = ReportWindow & {
+  shiftOwnerName?: string | null;
+  shiftLabName?: string | null;
+  reportGeneratedByName?: string | null;
   issuedInvoices: ReportInvoiceRow[];
   collectedInvoices: ReportInvoiceRow[];
   issuedCount: number;
@@ -191,6 +199,7 @@ export function buildOperationalReport(
   window: ReportWindow,
   issuedRows: ReportInvoiceRow[],
   collectedRows: ReportInvoiceRow[],
+  metadata: ReportMetadata = {},
 ): OperationalReport {
   const issuedInvoices = issuedRows.filter(row => row.status !== "cancelled" && row.status !== "refunded");
   const collectedInvoices = collectedRows.filter(row => row.status === "paid" && row.paidAt !== null);
@@ -227,6 +236,7 @@ export function buildOperationalReport(
 
   return {
     ...window,
+    ...metadata,
     issuedInvoices,
     collectedInvoices,
     issuedCount: issuedInvoices.length,

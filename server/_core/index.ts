@@ -2,8 +2,8 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { and, desc, eq, gte, lt, ne, or } from "drizzle-orm";
-import { clinicSettings, invoices, patients, shifts, userShiftAssignments } from "../../drizzle/schema";
+import { and, desc, eq, gte, inArray, lt, ne, or } from "drizzle-orm";
+import { clinicSettings, invoices, patients, shifts, userShiftAssignments, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { buildOperationalReport } from "../operational-reports";
 import { createReportDownloadResponse } from "../report-download";
@@ -26,6 +26,9 @@ const REPORT_SELECT = {
   total: invoices.total,
   status: invoices.status,
   paymentMethod: invoices.paymentMethod,
+  paymentBank: invoices.paymentBank,
+  transactionNumber: invoices.transactionNumber,
+  employeeName: users.name,
   consultationType: invoices.consultationType,
   consultationFee: invoices.consultationFee,
 } as const;
@@ -159,19 +162,38 @@ async function startServer() {
           const [shift] = await db.select().from(shifts)
             .where(and(eq(shifts.shiftDate, window.dateKey), eq(shifts.shiftType, window.shiftType)))
             .limit(1);
-          if (!shift) return { report: buildOperationalReport(window, [], []), ...branding };
+          if (!shift) {
+            return {
+              report: buildOperationalReport(window, [], [], { reportGeneratedByName: user?.name }),
+              ...branding,
+            };
+          }
+          const staffIds = [shift.cashierUserId, shift.labUserId].filter((id): id is number => id != null);
+          const staffRows = staffIds.length
+            ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, staffIds))
+            : [];
+          const staffById = new Map(staffRows.map(row => [row.id, row.name]));
           const rows = await db.select(REPORT_SELECT)
             .from(invoices)
             .innerJoin(patients, eq(invoices.patientId, patients.id))
+            .leftJoin(users, eq(invoices.createdBy, users.id))
             .where(eq(invoices.shiftId, shift.id))
             .orderBy(desc(invoices.createdAt));
-          return { report: buildOperationalReport(window, rows, rows), ...branding };
+          return {
+            report: buildOperationalReport(window, rows, rows, {
+              shiftOwnerName: shift.cashierUserId ? staffById.get(shift.cashierUserId) : null,
+              shiftLabName: shift.labUserId ? staffById.get(shift.labUserId) : null,
+              reportGeneratedByName: user?.name,
+            }),
+            ...branding,
+          };
         }
 
         const [issuedRows, collectedRows] = await Promise.all([
           db.select(REPORT_SELECT)
             .from(invoices)
             .innerJoin(patients, eq(invoices.patientId, patients.id))
+            .leftJoin(users, eq(invoices.createdBy, users.id))
             .where(and(
               ne(invoices.status, "cancelled"),
               gte(invoices.createdAt, window.start),
@@ -181,13 +203,19 @@ async function startServer() {
           db.select(REPORT_SELECT)
             .from(invoices)
             .innerJoin(patients, eq(invoices.patientId, patients.id))
+            .leftJoin(users, eq(invoices.createdBy, users.id))
             .where(or(
               and(eq(invoices.status, "paid"), gte(invoices.paidAt, window.start), lt(invoices.paidAt, window.end)),
               and(eq(invoices.status, "refunded"), gte(invoices.refundedAt, window.start), lt(invoices.refundedAt, window.end)),
             ))
             .orderBy(desc(invoices.paidAt)),
         ]);
-        return { report: buildOperationalReport(window, issuedRows, collectedRows), ...branding };
+        return {
+          report: buildOperationalReport(window, issuedRows, collectedRows, {
+            reportGeneratedByName: user?.name,
+          }),
+          ...branding,
+        };
       },
       renderPdf: renderOperationalReportPdf,
     });
