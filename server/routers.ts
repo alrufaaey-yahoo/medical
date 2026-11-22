@@ -1004,9 +1004,10 @@ export const appRouter = router({
           paymentMethod: invoices.paymentMethod,
           paymentBank: invoices.paymentBank,
           transactionNumber: invoices.transactionNumber,
+          employeeName: users.name,
           consultationType: invoices.consultationType,
           consultationFee: invoices.consultationFee,
-        }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
+        }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id)).leftJoin(users, eq(invoices.createdBy, users.id))
           .where(and(gte(invoices.createdAt, window.start), lt(invoices.createdAt, window.end)))
           .orderBy(desc(invoices.createdAt)),
         db.select({
@@ -1020,9 +1021,10 @@ export const appRouter = router({
           paymentMethod: invoices.paymentMethod,
           paymentBank: invoices.paymentBank,
           transactionNumber: invoices.transactionNumber,
+          employeeName: users.name,
           consultationType: invoices.consultationType,
           consultationFee: invoices.consultationFee,
-        }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
+        }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id)).leftJoin(users, eq(invoices.createdBy, users.id))
           .where(or(
             and(eq(invoices.status, "paid"), gte(invoices.paidAt, window.start), lt(invoices.paidAt, window.end)),
             and(eq(invoices.status, "refunded"), gte(invoices.refundedAt, window.start), lt(invoices.refundedAt, window.end)),
@@ -1060,9 +1062,10 @@ export const appRouter = router({
         paymentMethod: invoices.paymentMethod,
         paymentBank: invoices.paymentBank,
         transactionNumber: invoices.transactionNumber,
+        employeeName: users.name,
         consultationType: invoices.consultationType,
         consultationFee: invoices.consultationFee,
-      }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id))
+      }).from(invoices).innerJoin(patients, eq(invoices.patientId, patients.id)).leftJoin(users, eq(invoices.createdBy, users.id))
         .where(eq(invoices.shiftId, shift.id))
         .orderBy(desc(invoices.createdAt));
       return { shift, report: buildOperationalReport(window, rows, rows) };
