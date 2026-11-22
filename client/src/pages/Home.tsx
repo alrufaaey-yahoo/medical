@@ -6,6 +6,7 @@ import {
   FlaskConical,
   LayoutDashboard,
   LogIn,
+  LogOut,
   Menu,
   MoreHorizontal,
   ReceiptText,
@@ -95,6 +96,7 @@ export default function Home() {
   const [existingInvoiceFor, setExistingInvoiceFor] = useState<string | null | undefined>(undefined);
   const [editorInvoiceId, setEditorInvoiceId] = useState<number | null>(null);
   const [showLoginPanel, setShowLoginPanel] = useState(false);
+  const [showLogoutReminder, setShowLogoutReminder] = useState(false);
   const [drawerPatient, setDrawerPatient] = useState<Patient | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedTestCode, setSelectedTestCode] = useState("");
@@ -127,6 +129,7 @@ export default function Home() {
   const currentShiftInput = useMemo(() => ({ shiftDate: getClinicShiftDateKey(), shiftType: serverShiftByLabel[shift] }), [shift]);
   const currentShiftQuery = trpc.shifts.current.useQuery(currentShiftInput, { enabled: Boolean(operationalRole), retry: false });
   const trpcUtils = trpc.useUtils();
+  const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: () => { void trpcUtils.auth.me.invalidate(); window.location.reload(); } });
 
   const registerMutation = trpc.patients.register.useMutation();
   const followUpMutation = trpc.patients.addTests.useMutation();
@@ -630,11 +633,11 @@ export default function Home() {
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-help"><div className="help-icon"><ShieldCheck size={17} /></div><div><strong>بياناتك محمية</strong><span>جلسة تشغيل موثقة</span></div></div>
-          <button className="user-mini" onClick={() => setShowLoginPanel(true)}>
+          <div className="user-mini">
             <div className="avatar">{authQuery.data.name?.slice(0, 2) ?? "م"}</div>
-            <div><strong>{authQuery.data.name ?? "مستخدم"}</strong><span>{roleLabels[effectiveRole]} · تغيير الدخول</span></div>
-            <MoreHorizontal size={17} />
-          </button>
+            <div><strong>{authQuery.data.name ?? "مستخدم"}</strong><span>{roleLabels[effectiveRole]}</span><button type="button" className="link-button" onClick={() => setShowLoginPanel(true)}>تغيير الحساب</button></div>
+            <button type="button" className="icon-button" onClick={() => setShowLogoutReminder(true)} aria-label="تسجيل الخروج" title="تسجيل الخروج"><LogOut size={17} /></button>
+          </div>
         </div>
       </aside>
 
@@ -668,6 +671,7 @@ export default function Home() {
         {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
         {drawerPatient && <PatientDrawer patient={drawerPatient} catalog={catalog} prices={prices} onClose={() => setDrawerPatient(null)} onPrintInvoice={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("invoice", snapshot); }} onPrintMedicalReport={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("patient-report", snapshot); }} onEditInvoice={() => { if (drawerPatient.databaseInvoiceId) { setEditorInvoiceId(drawerPatient.databaseInvoiceId); setDrawerPatient(null); } }} onAddInvoice={() => { const number = drawerPatient.id; setDrawerPatient(null); openExistingInvoice(number); }} onNavigate={section => { setActiveSection(section); }} />}
       </Suspense>
+      {showLogoutReminder && <div className="modal-backdrop" onMouseDown={() => setShowLogoutReminder(false)}><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="logout-reminder-title" onMouseDown={event => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">تذكير قبل المغادرة</span><h2 id="logout-reminder-title">راجع الفواتير وتقرير الوردية</h2></div><button className="icon-button" onClick={() => setShowLogoutReminder(false)} aria-label="إغلاق"><X size={18} /></button></div><div className="modal-body"><p className="modal-paragraph">تأكد من حفظ الفواتير وتثبيت التحصيلات قبل تسجيل الخروج. يمكنك مراجعة تقرير الوردية باسمك الآن؛ لا تُغلق الوردية تلقائيًا عند الخروج.</p></div><div className="modal-footer"><button className="button button-secondary" onClick={() => { setShowLogoutReminder(false); setActiveSection("reports"); }}>مراجعة التقارير</button><button className="button button-primary" disabled={logoutMutation.isPending} onClick={() => logoutMutation.mutate()}><LogOut size={16} />{logoutMutation.isPending ? "جارٍ الخروج..." : "تأكيد تسجيل الخروج"}</button></div></div></div>}
       {(effectiveRole === "cashier" || effectiveRole === "lab") && <TeamCommunication role={effectiveRole} patient={effectiveRole === "lab" ? selectedPatient : undefined} open={teamChatOpen} onOpenChange={setTeamChatOpen} />}
       {toast && <div className="toast"><BadgeCheck size={17} /><span>{toast}</span><button onClick={() => setToast("")} aria-label="إغلاق التنبيه"><X size={14} /></button></div>}
     </div>

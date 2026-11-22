@@ -70,6 +70,21 @@ describe("operational report periods in Africa/Khartoum", () => {
     expect(report.paymentBreakdown).toEqual([{ method: "بنكي · بنكك", count: 1, total: 35000 }]);
     expect(report.collectedInvoices[0]).toMatchObject({ paymentBank: "بنكك", transactionNumber: "0427" });
   });
+
+  it("splits net collections into consultation and lab amounts by cash or bank and subtracts refunds", () => {
+    const cash = invoice({ invoiceNumber: "CASH", total: 1000, status: "paid", paidAt: new Date("2026-11-21T02:00:00.000Z"), paymentMethod: "cash", consultationFee: 200 });
+    const bank = invoice({ invoiceNumber: "BANK", total: 2000, status: "paid", paidAt: new Date("2026-11-21T02:00:00.000Z"), paymentMethod: "bank", paymentBank: "بنكك", transactionNumber: "0427", employeeName: "سارة", consultationFee: 500 });
+    const refund = invoice({ invoiceNumber: "REFUND", total: 600, status: "refunded", refundedAt: new Date("2026-11-21T02:00:00.000Z"), paymentMethod: "cash", consultationFee: 100 });
+    const report = buildOperationalReport(getReportWindow("daily", "2026-11-21"), [cash, bank], [cash, bank, refund]);
+    expect(report.netTotal).toBe(2400);
+    expect(report.netCollectionBreakdown).toEqual([
+      { service: "مختبر", method: "بنكي · بنكك", total: 1500 },
+      { service: "معاينة", method: "بنكي · بنكك", total: 500 },
+      { service: "مختبر", method: "نقدي", total: 300 },
+      { service: "معاينة", method: "نقدي", total: 100 },
+    ]);
+    expect(report.collectedInvoices.find(row => row.invoiceNumber === "BANK")).toMatchObject({ paymentBank: "بنكك", transactionNumber: "0427", employeeName: "سارة" });
+  });
 });
 
 describe("report PDF download authorization and response", () => {

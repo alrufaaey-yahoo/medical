@@ -23,6 +23,7 @@ type ReportRow = {
   paymentMethod?: string | null;
   paymentBank?: string | null;
   transactionNumber?: string | null;
+  employeeName?: string | null;
   createdAt: Date | string;
   paidAt?: Date | string | null;
 };
@@ -42,6 +43,7 @@ type ReportView = {
   issuedInvoices: ReportRow[];
   collectedInvoices: ReportRow[];
   paymentBreakdown: Array<{ method: string; count: number; total: number }>;
+  netCollectionBreakdown: Array<{ service: string; method: string; total: number }>;
 };
 
 const PERIOD_LABEL: Record<ReportPeriod, string> = { daily: "اليوم", weekly: "هذا الأسبوع", monthly: "هذا الشهر" };
@@ -95,6 +97,7 @@ function buildDemoReport(patients: Patient[], range: ReportPeriod, catalog: LabT
     issuedInvoices: issued.map(toRow),
     collectedInvoices: collected.map(toRow),
     paymentBreakdown: [{ method: "نقدي", count: collected.length, total: collected.reduce((sum, patient) => sum + getInvoiceTotal(patient, catalog, prices), 0) }],
+    netCollectionBreakdown: [],
   };
 }
 
@@ -115,7 +118,7 @@ function ReportTable({ rows, emptyText }: { rows: ReportRow[]; emptyText: string
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الإجمالي</th><th>الدفع / البنك</th><th>رقم العملية</th><th>الحالة</th><th>الوقت</th></tr></thead>
+        <thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الإجمالي</th><th>الدفع / البنك</th><th>رقم العملية</th><th>الموظف</th><th>الحالة</th><th>الوقت</th></tr></thead>
         <tbody>
           {rows.map(row => (
             <tr key={`${row.invoiceNumber}-${row.status}`}>
@@ -125,6 +128,7 @@ function ReportTable({ rows, emptyText }: { rows: ReportRow[]; emptyText: string
               <td><strong>{formatCurrency(row.total)}</strong></td>
               <td>{row.paymentMethod === "bank" ? `بنكي · ${row.paymentBank ?? "—"}` : row.paymentMethod === "cash" ? "نقدي" : "—"}</td>
               <td className="mono">{row.transactionNumber ?? "—"}</td>
+              <td>{row.employeeName ?? "—"}</td>
               <td>{statusLabel(row.status)}</td>
               <td className="muted-cell">{toTime(row.paidAt ?? row.createdAt)}</td>
             </tr>
@@ -247,6 +251,10 @@ export function Reports({ patients, catalog, prices, hasSession, canDownloadPdf,
                 <div className="payment-methods">{report.paymentBreakdown.map(row => <div key={row.method}><span>{row.method}</span><strong>{formatCurrency(row.total)}</strong><small>{row.count} عملية</small></div>)}</div>
               </section>
             )}
+            {report.netCollectionBreakdown.length > 0 && <section className="panel payment-breakdown">
+              <div className="panel-header"><div><span className="eyebrow">صافي التحصيل</span><h2>حسب العيادة/المعاينة والمختبر ثم وسيلة الدفع</h2></div></div>
+              <div className="payment-methods">{report.netCollectionBreakdown.map((row, index) => <div key={`${row.service}-${row.method}-${index}`}><span>{row.service} · {row.method}</span><strong>{formatCurrency(row.total)}</strong></div>)}</div>
+            </section>}
             <section className="panel">
               <div className="panel-header"><div><span className="eyebrow">الفواتير المنشأة · {report.issuedCount}</span><h2>حركة الفواتير</h2></div><span className="catalog-count"><CalendarDays size={15} />{PERIOD_LABEL[period]}</span></div>
               <ReportTable rows={report.issuedInvoices} emptyText="لا توجد فواتير في هذه الفترة" />

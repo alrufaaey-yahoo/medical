@@ -293,11 +293,14 @@ export function InvoiceEditor({ invoiceId, catalog, prices, onClose, onSaved, on
 }
 
 export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
+  const namedAccountsQuery = trpc.auth.namedAccounts.useQuery(undefined, { retry: false });
+  const namedLoginMutation = trpc.auth.namedLogin.useMutation();
   const previewQuery = trpc.auth.previewAvailable.useQuery(undefined, { retry: false });
   const previewMutation = trpc.auth.previewLogin.useMutation();
   const [error, setError] = useState("");
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [password, setPassword] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState<{ id: number; name: string | null; role: Role } | null>(null);
   const roles: Role[] = ["admin", "supervisor", "cashier", "lab"];
 
   const officialLogin = () => {
@@ -321,6 +324,16 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
     });
   };
 
+  const namedLogin = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedAccount) return;
+    setError("");
+    namedLoginMutation.mutate({ userId: selectedAccount.id, password }, {
+      onSuccess: () => { onToast(`مرحبًا ${selectedAccount.name ?? ""}`); window.setTimeout(() => window.location.reload(), 250); },
+      onError: mutationError => setError(mutationError.message || "تعذر تسجيل الدخول"),
+    });
+  };
+
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal-card login-card" onMouseDown={event => event.stopPropagation()}>
@@ -329,10 +342,19 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
           <button className="icon-button" onClick={onClose} aria-label="إغلاق"><X size={18} /></button>
           <div className="login-symbol"><ShieldCheck size={29} /></div>
           <span className="eyebrow">دخول آمن للمستوصف</span>
-          <h2>اختر طريقة الدخول</h2>
-          <p>اختر حسابًا تجريبيًا للدور المطلوب، أو سجّل الدخول بحساب Manus الرسمي.</p>
+          <h2>اختر اسمك للدخول</h2>
+          <p>اختر اسم الموظف؛ ستُطلب كلمة المرور ثم تُفتح الواجهة المحددة لصلاحيات حسابه.</p>
         </div>
         <div className="modal-body login-body">
+          {namedAccountsQuery.data && namedAccountsQuery.data.length > 0 && <>
+            {(["admin", "supervisor", "cashier", "lab"] as const).map(role => {
+              const accounts = namedAccountsQuery.data.filter(account => account.role === role);
+              if (!accounts.length) return null;
+              return <div key={role} className="login-account-group"><span className="eyebrow">{roleLabels[role]}</span><div className="demo-role-grid">{accounts.map(account => <button type="button" key={account.id} aria-pressed={selectedAccount?.id === account.id} className={selectedAccount?.id === account.id ? "selected" : ""} onClick={() => { setSelectedAccount({ ...account, role: account.role as Role }); setPassword(""); setError(""); }}><span className="demo-role-icon"><ShieldCheck size={16} /></span><span><strong>{account.name || "موظف"}</strong><small>{roleLabels[account.role as Role]}</small></span></button>)}</div></div>;
+            })}
+            {selectedAccount && <form className="preview-login-form" onSubmit={namedLogin}><label className="form-field full-field"><span>كلمة مرور {selectedAccount.name}</span><input autoComplete="current-password" autoFocus type="password" maxLength={128} required value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور" /></label><button className="button button-primary full-width" type="submit" disabled={namedLoginMutation.isPending || !password}>{namedLoginMutation.isPending ? "جارٍ التحقق..." : `دخول ${roleLabels[selectedAccount.role]}`}</button></form>}
+            <div className="login-divider"><span>أو</span></div>
+          </>}
           <button className="button button-primary full-width login-main-action" onClick={officialLogin}><LogIn size={17} />الدخول الموحد عبر Manus</button>
           {error && <div className="login-error"><AlertCircle size={15} />{error}</div>}
           {previewQuery.isLoading && <p className="login-note">جارٍ تحميل خيارات الدخول التجريبية...</p>}

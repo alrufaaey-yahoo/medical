@@ -18,6 +18,17 @@ export const previewLoginAccounts = mysqlTable("preview_login_accounts", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/** Named password accounts provisioned by an administrator or operations supervisor. */
+export const localLoginAccounts = mysqlTable("local_login_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  active: int("active").default(1).notNull(),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("local_login_accounts_user_unique").on(table.userId)]);
+
 export const clinicSettings = mysqlTable("clinic_settings", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 180 }).notNull(),

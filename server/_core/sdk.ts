@@ -317,6 +317,10 @@ class SDKServer {
       throw ForbiddenError("User not found");
     }
 
+    if (user.openId.startsWith("local_") && !(await db.isLocalLoginEnabled(user.id))) {
+      throw ForbiddenError("Local account is disabled");
+    }
+
     if (user.role === "user" && user.email) {
       const applied = await db.applyStaffRole(user.id, user.email);
       if (applied) user = (await db.getUserByOpenId(session.openId)) ?? user;

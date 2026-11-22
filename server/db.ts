@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, staffMembers, users } from "../drizzle/schema";
+import { InsertUser, localLoginAccounts, staffMembers, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -86,6 +86,14 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function isLocalLoginEnabled(userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const [account] = await db.select({ active: localLoginAccounts.active })
+    .from(localLoginAccounts).where(eq(localLoginAccounts.userId, userId)).limit(1);
+  return account?.active === 1;
 }
 
 /**

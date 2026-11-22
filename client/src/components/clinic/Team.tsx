@@ -23,11 +23,17 @@ export function TeamPanel({ role, onToast }: { role: Role; onToast: (message: st
   const isAdmin = role === "admin";
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
+  const [accountName, setAccountName] = useState("");
+  const [accountRole, setAccountRole] = useState<"admin" | "supervisor" | "cashier" | "lab">("cashier");
+  const [accountPassword, setAccountPassword] = useState("");
   const staffQuery = trpc.staff.list.useQuery(undefined, { retry: false });
   const usersQuery = trpc.users.list.useQuery(undefined, { enabled: isAdmin, retry: false });
   const createMutation = trpc.staff.create.useMutation();
   const updateMutation = trpc.staff.update.useMutation();
   const updateRoleMutation = trpc.users.updateRole.useMutation();
+  const accountsQuery = trpc.loginAccounts.list.useQuery(undefined, { retry: false });
+  const createAccountMutation = trpc.loginAccounts.create.useMutation();
+  const setAccountActiveMutation = trpc.loginAccounts.setActive.useMutation();
   const trpcUtils = trpc.useUtils();
 
   const refresh = () => {
@@ -95,6 +101,18 @@ export function TeamPanel({ role, onToast }: { role: Role; onToast: (message: st
           : "أضف حسابات الكاشير وفني المختبر. لا يمكن لمشرف التشغيل إنشاء حساب مشرف آخر أو تعديل كتالوج الفحوصات."}
         action={<button className="button button-primary" onClick={openCreate}><UserPlus size={16} />إضافة موظف</button>}
       />
+
+      <section className="panel">
+        <div className="panel-header"><div><span className="eyebrow">دخول فردي بكلمة مرور</span><h2>حسابات الموظفين</h2></div><ShieldCheck size={18} className="muted-icon" /></div>
+        <p className="settings-readonly-note">المدير يستطيع إنشاء جميع الأدوار بما فيها المديرين. مشرف النظام يستطيع إنشاء حسابات الاستقبال/الكاشير والمختبر فقط.</p>
+        <div className="form-grid" style={{ marginBottom: 18 }}>
+          <label className="form-field"><span>اسم الموظف *</span><input value={accountName} onChange={event => setAccountName(event.target.value)} placeholder="الاسم الذي سيظهر في الدخول" maxLength={180} /></label>
+          <label className="form-field"><span>الدور *</span><select value={accountRole} onChange={event => setAccountRole(event.target.value as typeof accountRole)}><option value="cashier">كاشير / استقبال</option><option value="lab">فني المختبر</option>{isAdmin && <><option value="supervisor">مشرف النظام</option><option value="admin">مدير</option></>}</select></label>
+          <label className="form-field"><span>كلمة المرور (8 أحرف على الأقل) *</span><input type="password" autoComplete="new-password" minLength={8} maxLength={128} value={accountPassword} onChange={event => setAccountPassword(event.target.value)} /></label>
+          <div className="form-field" style={{ justifyContent: "end" }}><button className="button button-primary" disabled={createAccountMutation.isPending || accountName.trim().length < 2 || accountPassword.length < 8} onClick={() => createAccountMutation.mutate({ name: accountName.trim(), role: accountRole, password: accountPassword }, { onSuccess: () => { setAccountName(""); setAccountPassword(""); void accountsQuery.refetch(); onToast("تم إنشاء حساب الدخول"); }, onError: error => onToast(error.message || "تعذر إنشاء الحساب") })}><UserPlus size={16} />إنشاء حساب</button></div>
+        </div>
+        {accountsQuery.isError ? <div className="empty-state"><AlertCircle size={20} /><strong>تعذر تحميل الحسابات</strong></div> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الدور</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>{(accountsQuery.data ?? []).map(account => <tr key={account.userId}><td><strong>{account.name ?? "بدون اسم"}</strong></td><td>{roleLabels[account.role as Role] ?? account.role}</td><td>{account.active ? "نشط" : "موقوف"}</td><td><button className="button button-secondary" disabled={setAccountActiveMutation.isPending} onClick={() => setAccountActiveMutation.mutate({ userId: account.userId, active: !account.active }, { onSuccess: () => { void accountsQuery.refetch(); onToast(account.active ? "تم إيقاف الحساب" : "تم تفعيل الحساب"); }, onError: error => onToast(error.message) })}>{account.active ? "إيقاف" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
+      </section>
 
       <section className="panel">
         <div className="panel-header">

@@ -51,7 +51,12 @@ function consultationLabel(row: ReportInvoiceRow): string {
 }
 
 function statusLabel(row: ReportInvoiceRow, collected: boolean): string {
-  if (collected) return row.paymentMethod === "cash" ? "نقدي" : safeText(row.paymentMethod ?? "مدفوع", 30);
+  if (collected) {
+    const details = row.paymentMethod === "bank"
+      ? `بنكي · ${safeText(row.paymentBank ?? "—", 40)} · رقم العملية ${safeText(row.transactionNumber ?? "—", 20)}`
+      : row.paymentMethod === "cash" ? "نقدي" : safeText(row.paymentMethod ?? "مدفوع", 30);
+    return `${details} · الموظف: ${safeText(row.employeeName, 80)}`;
+  }
   if (row.status === "paid") return "مدفوعة";
   if (row.status === "pending") return "بانتظار التحصيل";
   if (row.status === "refunded") return "مسترجعة";
@@ -65,7 +70,8 @@ function tableRows(rows: ReportInvoiceRow[], collected: boolean): string {
       <td class="mono">${safeText(row.patientNumber, 32)}</td>
       <td>${safeText(consultationLabel(row), 40)}</td>
       <td>${formatTime(collected ? row.paidAt ?? row.createdAt : row.createdAt)}</td>
-      <td>${safeText(statusLabel(row, collected), 30)}</td>
+      <td>${safeText(statusLabel(row, collected), 120)}</td>
+      <td>${safeText(collected ? row.employeeName : null, 80)}</td>
       <td class="money">${formatMoney(row.total)}</td>
     </tr>`).join("");
 }
@@ -89,6 +95,7 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
     { label: "إجمالي المعاينات", value: formatMoney(report.consultationTotal) },
     { label: "إجمالي الفحوصات", value: formatMoney(report.testsTotal) },
   ];
+  const netBreakdown = report.netCollectionBreakdown.map(row => `${safeText(row.service, 20)} · ${safeText(row.method, 40)}: ${formatMoney(row.total)}`).join(" · ") || "لا توجد تحصيلات صافية";
   const issuedRows = tableRows(report.issuedInvoices, false);
   const collectedRows = tableRows(report.collectedInvoices, true);
   return `<!doctype html>
@@ -135,10 +142,11 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
   <div class="cards">${cards.map(card => `<div class="card"><span>${card.label}</span><strong>${card.value}</strong></div>`).join("")}</div>
   <p class="note">المعاينات: ${report.consultationCount} (عمومي ${report.consultationGeneralCount} · اختصاصي ${report.consultationSpecialistCount}). جميع المبالغ بالجنيه السوداني.</p>
   <p class="note">طرق التحصيل: ${payments}</p>
+  <p class="note">صافي التحصيل حسب الخدمة وطريقة الدفع: ${netBreakdown}</p>
   <h2>الفواتير المنشأة خلال الفترة</h2>
-  ${issuedRows ? `<table><thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الوقت</th><th>الحالة / الطريقة</th><th>المبلغ</th></tr></thead><tbody>${issuedRows}</tbody></table>` : `<p class="empty">لا توجد فواتير منشأة في الفترة المحددة.</p>`}
+  ${issuedRows ? `<table><thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الوقت</th><th>الحالة / الطريقة</th><th>الموظف</th><th>المبلغ</th></tr></thead><tbody>${issuedRows}</tbody></table>` : `<p class="empty">لا توجد فواتير منشأة في الفترة المحددة.</p>`}
   <h2>التحصيلات المسجلة خلال الفترة</h2>
-  ${collectedRows ? `<table><thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الوقت</th><th>طريقة الدفع</th><th>المبلغ</th></tr></thead><tbody>${collectedRows}</tbody></table>` : `<p class="empty">لا توجد تحصيلات مسجلة في الفترة المحددة.</p>`}
+  ${collectedRows ? `<table><thead><tr><th>رقم الفاتورة</th><th>رقم الملف</th><th>الخدمة</th><th>الوقت</th><th>طريقة الدفع / البنك / العملية</th><th>الموظف</th><th>المبلغ</th></tr></thead><tbody>${collectedRows}</tbody></table>` : `<p class="empty">لا توجد تحصيلات مسجلة في الفترة المحددة.</p>`}
   <div class="footer">
     ${branding.clinicFooterText ? `<div><strong>${safeText(branding.clinicFooterText, 240)}</strong></div>` : ""}
     <div>يُحتسب إنشاء الفاتورة بحسب وقت الإنشاء، ويُحتسب التحصيل بحسب وقت الدفع. لا يتضمن التقرير نتائج المختبر أو بيانات التشخيص.</div>

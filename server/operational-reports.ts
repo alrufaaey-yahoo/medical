@@ -24,11 +24,13 @@ export type ReportInvoiceRow = {
   paymentMethod: string | null;
   paymentBank?: string | null;
   transactionNumber?: string | null;
+  employeeName?: string | null;
   consultationType?: ConsultationType | null;
   consultationFee?: number | null;
 };
 
 export type PaymentBreakdownRow = { method: string; count: number; total: number };
+export type NetCollectionBreakdownRow = { service: "معاينة" | "مختبر"; method: string; total: number };
 
 export type OperationalReport = ReportWindow & {
   issuedInvoices: ReportInvoiceRow[];
@@ -41,6 +43,7 @@ export type OperationalReport = ReportWindow & {
   collectedTotal: number;
   refundedTotal: number;
   netTotal: number;
+  netCollectionBreakdown: NetCollectionBreakdownRow[];
   consultationCount: number;
   consultationGeneralCount: number;
   consultationSpecialistCount: number;
@@ -205,6 +208,23 @@ export function buildOperationalReport(
     paymentMap.set(method, current);
   }
 
+  const netMap = new Map<string, NetCollectionBreakdownRow>();
+  const addNet = (row: ReportInvoiceRow, sign: number) => {
+    const consultation = Math.min(row.total, consultationFeeOf(row));
+    const method = row.paymentMethod === "cash" ? "نقدي"
+      : row.paymentMethod === "bank" ? `بنكي${row.paymentBank ? ` · ${row.paymentBank}` : ""}`
+        : row.paymentMethod?.trim() || "غير محدد";
+    for (const [service, amount] of [["معاينة", consultation], ["مختبر", Math.max(0, row.total - consultation)]] as const) {
+      if (!amount) continue;
+      const key = `${service}\u0000${method}`;
+      const current = netMap.get(key) ?? { service, method, total: 0 };
+      current.total += sign * amount;
+      netMap.set(key, current);
+    }
+  };
+  collectedInvoices.forEach(row => addNet(row, 1));
+  collectedRows.filter(row => row.status === "refunded" && row.refundedAt !== null).forEach(row => addNet(row, -1));
+
   return {
     ...window,
     issuedInvoices,
@@ -217,6 +237,7 @@ export function buildOperationalReport(
     collectedTotal: collectedInvoices.reduce((sum, row) => sum + row.total, 0),
     refundedTotal,
     netTotal: collectedInvoices.reduce((sum, row) => sum + row.total, 0) - refundedTotal,
+    netCollectionBreakdown: [...netMap.values()].filter(row => row.total !== 0).sort((a, b) => b.total - a.total),
     consultationCount: consultationInvoices.length,
     consultationGeneralCount: consultationInvoices.filter(row => consultationTypeOf(row) === "general").length,
     consultationSpecialistCount: consultationInvoices.filter(row => consultationTypeOf(row) === "specialist").length,

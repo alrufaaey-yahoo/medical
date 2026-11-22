@@ -8,15 +8,16 @@ const PAGE_WIDTH = 595.28;
 const LEFT = 42;
 const CONTENT_WIDTH = PAGE_WIDTH - LEFT * 2;
 const TABLE_COLUMNS = [
-  { label: "رقم الفاتورة", width: 118, key: "invoice" },
-  { label: "رقم الملف", width: 96, key: "patient" },
-  { label: "الخدمة", width: 88, key: "service" },
-  { label: "الوقت", width: 92, key: "time" },
-  { label: "الحالة / الطريقة", width: 95, key: "state" },
-  { label: "المبلغ", width: 62, key: "total" },
+  { label: "الفاتورة", width: 75, key: "invoice" },
+  { label: "الملف", width: 62, key: "patient" },
+  { label: "الخدمة", width: 70, key: "service" },
+  { label: "الوقت", width: 48, key: "time" },
+  { label: "الدفع / البنك / العملية", width: 110, key: "state" },
+  { label: "الموظف", width: 76, key: "employee" },
+  { label: "المبلغ", width: 70, key: "total" },
 ] as const;
 
-type TableEntry = { invoice: string; patient: string; service: string; time: string; state: string; total: string };
+type TableEntry = { invoice: string; patient: string; service: string; time: string; state: string; employee: string; total: string };
 
 function safeText(value: string | null | undefined, maxLength = 120): string {
   return (value ?? "—").replace(/[\r\n\0\u2028\u2029]/g, " ").trim().slice(0, maxLength) || "—";
@@ -44,7 +45,9 @@ function consultationLabel(row: ReportInvoiceRow): string {
 
 function tableEntry(row: ReportInvoiceRow, collected: boolean): TableEntry {
   const status = collected
-    ? safeText(row.paymentMethod ?? "مدفوع", 30)
+    ? row.paymentMethod === "bank"
+      ? `بنكي · ${safeText(row.paymentBank, 28)} · ${safeText(row.transactionNumber, 10)}`
+      : safeText(row.paymentMethod === "cash" ? "نقدي" : row.paymentMethod ?? "مدفوع", 30)
     : row.status === "paid"
       ? "مدفوعة"
       : row.status === "pending"
@@ -56,6 +59,7 @@ function tableEntry(row: ReportInvoiceRow, collected: boolean): TableEntry {
     service: consultationLabel(row),
     time: formatTime(collected ? row.paidAt ?? row.createdAt : row.createdAt),
     state: status,
+    employee: collected ? safeText(row.employeeName, 24) : "—",
     total: formatMoney(row.total),
   };
 }
@@ -121,6 +125,10 @@ export async function renderOperationalReportPdfWithPdfKit(report: OperationalRe
     { label: "إجمالي الفحوصات", value: formatMoney(report.testsTotal) },
   ]);
 
+  doc.font("Amiri").fillColor("#536970").fontSize(8)
+    .text(`صافي التحصيل حسب الخدمة وطريقة الدفع: ${report.netCollectionBreakdown.map(row => `${row.service} · ${row.method}: ${formatMoney(row.total)}`).join(" · ") || "لا توجد تحصيلات صافية"}`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
+  y += 14;
+
   doc.font("Amiri").fillColor("#536970").fontSize(9)
     .text(`المعاينات: ${report.consultationCount} (عمومي ${report.consultationGeneralCount} · اختصاصي ${report.consultationSpecialistCount}). جميع المبالغ بالجنيه السوداني.`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
   y += 17;
@@ -165,7 +173,7 @@ export async function renderOperationalReportPdfWithPdfKit(report: OperationalRe
     for (const row of rows) {
       if (y + 28 > 780) startNewPage(true);
       let x = LEFT;
-      const values = [row.invoice, row.patient, row.service, row.time, row.state, row.total];
+      const values = [row.invoice, row.patient, row.service, row.time, row.state, row.employee, row.total];
       values.forEach((value, index) => {
         const column = TABLE_COLUMNS[index];
         doc.font("Amiri").fillColor("#243b40").fontSize(8)
