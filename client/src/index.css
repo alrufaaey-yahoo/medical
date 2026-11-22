@@ -376,3 +376,84 @@ button:disabled { cursor: not-allowed; opacity: .52; }
   .multi-result-page .print-test-block { break-inside: avoid; page-break-inside: avoid; }
   .multi-result-page .result-print-table { table-layout: auto; }
 }
+
+
+/* Floating team chat and actionable notification center */
+.notification-center { position: relative; z-index: 65; }
+.notification-button { display: inline-grid; place-items: center; }
+.notification-button i { display: none; }
+.notification-count { position: absolute; top: -6px; left: -6px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; color: #fff; background: #d96f62; border: 2px solid #fff; border-radius: 999px; font-size: 9px; font-weight: 800; line-height: 1; }
+.notification-panel { position: absolute; top: calc(100% + 11px); left: 0; z-index: 80; width: min(390px, calc(100vw - 24px)); max-height: min(570px, calc(100dvh - 88px)); display: flex; flex-direction: column; overflow: hidden; color: var(--ink); background: #fff; border: 1px solid #e4ecea; border-radius: 16px; box-shadow: 0 22px 56px rgba(16, 50, 61, .18); animation: toast-in .16s ease; }
+.notification-panel-header { display: flex; align-items: center; gap: 10px; padding: 15px 16px; border-bottom: 1px solid #edf2f1; background: linear-gradient(120deg, #fbfefe, #f4faf8); }
+.notification-panel-icon { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; color: var(--teal); background: #e3f6f1; border-radius: 10px; }
+.notification-panel-header > div:nth-child(2) { display: grid; flex: 1; gap: 3px; }
+.notification-panel-header strong { color: #294a54; font-size: 12px; }
+.notification-panel-header span { color: #91a1a4; font-size: 9px; }
+.notification-panel-body { overflow-y: auto; padding: 5px 13px 13px; }
+.notification-group { display: grid; gap: 8px; padding: 11px 0; }
+.notification-group + .notification-group { border-top: 1px solid #edf2f1; }
+.notification-group-title { display: flex; align-items: center; gap: 7px; padding: 0 3px 2px; color: #62777d; font-size: 10px; font-weight: 800; }
+.notification-group-title b { min-width: 18px; padding: 2px 5px; color: #42736f; background: #e9f7f4; border-radius: 10px; text-align: center; font-size: 9px; }
+.notification-item { width: 100%; display: flex; align-items: flex-start; gap: 9px; padding: 10px; color: inherit; background: #fbfdfd; border: 1px solid #edf2f1; border-radius: 11px; text-align: right; }
+.notification-item-icon { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; border-radius: 9px; }
+.notification-item-icon.amber { color: #b37a28; background: #fff3dd; }
+.notification-item-icon.blue { color: #3979b9; background: #eaf2fb; }
+.notification-item-copy { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.notification-item-copy strong { color: #415e66; font-size: 10px; }
+.notification-item-copy > span { overflow: hidden; color: #6e858a; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.notification-item-copy p { margin: 1px 0; color: #987448; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.notification-item-copy small { color: #9caaac; font-size: 8px; }
+.notification-item-copy .notification-message-preview { display: -webkit-box; overflow: hidden; color: #647c81; line-height: 1.55; white-space: normal; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.notification-resolve { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; color: #58877a; background: #ecf8f3; border-radius: 8px; }
+.notification-resolve:hover { color: #fff; background: var(--teal); }
+.notification-inline-action { display: inline-flex; align-items: center; gap: 5px; justify-self: start; margin-top: 3px; padding: 3px 0; color: #188b82; background: transparent; font-size: 9px; font-weight: 800; }
+.notification-inline-action:hover { color: #116a65; }
+.notification-mark-read { justify-self: start; padding: 4px 2px; color: #34847d; background: transparent; font-size: 9px; font-weight: 800; }
+.notification-empty { display: flex; align-items: center; gap: 6px; margin: 0; padding: 10px; color: #91a2a5; background: #f9fbfb; border-radius: 9px; font-size: 9px; }
+.notification-empty svg { color: #62a99d; }
+.notification-no-feed { margin: 13px; }
+.notification-error { margin: 0; padding: 9px; color: #a95858; background: #fff3f1; border-radius: 8px; font-size: 9px; line-height: 1.5; }
+.notification-panel-footer { display: flex; padding: 11px 13px 13px; border-top: 1px solid #edf2f1; background: #fcfdfd; }
+.notification-panel-footer .button { width: 100%; min-height: 36px; font-size: 10px; }
+
+.team-communication-root { position: fixed; left: 24px; bottom: 24px; z-index: 50; direction: rtl; }
+.team-chat-fab { min-width: 58px; height: 58px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 0 18px; color: #fff; background: linear-gradient(135deg, #0f9d94, #187e80); border: 1px solid rgba(255,255,255,.26); border-radius: 999px; box-shadow: 0 12px 30px rgba(15, 112, 108, .28); transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
+.team-chat-fab:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(15, 112, 108, .34); }
+.team-chat-fab.active { color: #dff6f2; background: #214e5a; }
+.team-chat-fab-label { font-size: 11px; font-weight: 800; white-space: nowrap; }
+.team-communication-panel { position: absolute; left: 0; bottom: 72px; width: min(394px, calc(100vw - 32px)); height: min(610px, calc(100dvh - 116px)); display: flex; flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #dfebe8; border-radius: 19px; box-shadow: 0 24px 60px rgba(16, 50, 61, .22); animation: toast-in .18s ease; }
+.team-communication-header { display: flex; align-items: center; gap: 10px; padding: 15px 15px 13px; color: #fff; background: linear-gradient(120deg, #183f50, #176d68); }
+.team-chat-heading-icon { width: 37px; height: 37px; flex: 0 0 37px; display: grid; place-items: center; color: #b9f1e7; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.13); border-radius: 11px; }
+.team-chat-heading-copy { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.team-chat-heading-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.team-chat-heading-copy span { display: flex; align-items: center; gap: 6px; color: rgba(255,255,255,.72); font-size: 9px; }
+.team-chat-heading-copy span i { width: 6px; height: 6px; background: #55d4a3; border-radius: 50%; box-shadow: 0 0 0 3px rgba(85,212,163,.15); }
+.team-chat-close { color: rgba(255,255,255,.8); background: rgba(255,255,255,.08); }
+.team-chat-close:hover { color: #fff; background: rgba(255,255,255,.17); }
+.team-communication-panel .attention-compose { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 11px 12px 0; padding: 11px; background: #fffaf2; border-color: #f2e7d1; }
+.attention-compose-copy { grid-column: 1 / -1; display: grid; gap: 5px; }
+.attention-compose-copy strong { display: flex; align-items: center; gap: 6px; color: #805e31; font-size: 10px; }
+.attention-compose-copy span { color: #9b876a; font-size: 9px; line-height: 1.5; }
+.team-communication-panel .attention-compose input { min-height: 35px; font-size: 9px; }
+.team-communication-panel .attention-compose .button { min-height: 35px; padding: 0 10px; font-size: 9px; }
+.team-communication-panel .communication-error { grid-column: 1 / -1; }
+.team-communication-panel .team-chat { flex: 1; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px; margin: 11px 12px 12px; padding: 0; background: transparent; border: 0; }
+.team-chat-status-row { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; }
+.team-communication-panel .team-chat-messages { min-height: 100px; max-height: none; padding: 10px; background: #f7faf9; border: 1px solid #edf2f1; border-radius: 12px; }
+.team-communication-panel .team-chat-message { max-width: 88%; padding: 9px 10px; border-radius: 12px; }
+.team-communication-panel .team-chat-message p { font-size: 10px; }
+.team-communication-panel .team-chat-compose { gap: 7px; }
+.team-communication-panel .team-chat-compose input { height: 40px; font-size: 10px; }
+.team-communication-panel .team-chat-compose .button { min-height: 40px; padding: 0 12px; font-size: 10px; }
+.team-communication-panel .communication-empty { font-size: 9px; }
+@media (max-width: 720px) {
+  .notification-panel { position: fixed; top: 70px; right: 14px; left: 14px; width: auto; max-height: calc(100dvh - 84px); }
+  .team-communication-root { left: 14px; bottom: 14px; }
+  .team-chat-fab { width: 56px; min-width: 56px; height: 56px; padding: 0; }
+  .team-chat-fab-label { display: none; }
+  .team-communication-panel { position: fixed; right: 14px; bottom: 82px; left: 14px; width: auto; height: min(620px, calc(100dvh - 100px)); }
+  .team-communication-panel .attention-compose { grid-template-columns: minmax(0, 1fr) auto; }
+}
+@media print {
+  .notification-center, .team-communication-root { display: none !important; }
+}

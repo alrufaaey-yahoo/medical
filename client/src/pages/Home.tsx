@@ -1,7 +1,6 @@
 import {
   ArrowLeft,
   BadgeCheck,
-  Bell,
   CalendarDays,
   FileBarChart,
   FlaskConical,
@@ -43,6 +42,7 @@ import { Reports } from "@/components/clinic/Reports";
 import { Settings, type ClinicSettingsDraft } from "@/components/clinic/Settings";
 import { TeamPanel } from "@/components/clinic/Team";
 import { TeamCommunication } from "@/components/clinic/TeamCommunication";
+import { NotificationCenter } from "@/components/clinic/NotificationCenter";
 import { AppLogo, SectionTitle } from "@/components/clinic/ui";
 
 type NavItem = { id: Section; label: string; icon: LucideIcon };
@@ -83,6 +83,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [teamChatOpen, setTeamChatOpen] = useState(false);
   const [showPatientDialog, setShowPatientDialog] = useState(false);
   const [existingInvoiceFor, setExistingInvoiceFor] = useState<string | null | undefined>(undefined);
   const [editorInvoiceId, setEditorInvoiceId] = useState<number | null>(null);
@@ -530,14 +531,14 @@ export default function Home() {
       return <Patients patients={patients} search={search} setSearch={setSearch} onAddPatient={() => setShowPatientDialog(true)} onSelectPatient={setDrawerPatient} onPrintInvoice={patient => triggerPrint("invoice", patient)} />;
     }
     if (activeSection === "billing") {
-      return <><Billing patients={billingPatients} catalog={catalog} prices={prices} banks={(paymentBanksQuery.data ?? []).map(bank => ({ id: bank.id, name: bank.name }))} onAddPatient={() => setShowPatientDialog(true)} onAddInvoice={() => openExistingInvoice()} onPrintInvoice={patient => triggerPrint("invoice", patient)} onEditInvoice={patient => patient.databaseInvoiceId && setEditorInvoiceId(patient.databaseInvoiceId)} onMarkPaid={handleMarkPaid} onCancel={handleCancelInvoice} onRefund={handleRefundInvoice} saving={paymentMutation.isPending || cancelMutation.isPending || refundMutation.isPending || followUpMutation.isPending} canManage={effectiveRole === "admin" || effectiveRole === "cashier"} />{effectiveRole === "cashier" && <TeamCommunication role="cashier" />}</>;
+      return <Billing patients={billingPatients} catalog={catalog} prices={prices} banks={(paymentBanksQuery.data ?? []).map(bank => ({ id: bank.id, name: bank.name }))} onAddPatient={() => setShowPatientDialog(true)} onAddInvoice={() => openExistingInvoice()} onPrintInvoice={patient => triggerPrint("invoice", patient)} onEditInvoice={patient => patient.databaseInvoiceId && setEditorInvoiceId(patient.databaseInvoiceId)} onMarkPaid={handleMarkPaid} onCancel={handleCancelInvoice} onRefund={handleRefundInvoice} saving={paymentMutation.isPending || cancelMutation.isPending || refundMutation.isPending || followUpMutation.isPending} canManage={effectiveRole === "admin" || effectiveRole === "cashier"} />;
     }
     if (activeSection === "lab") {
-      return <><Lab patients={patients} catalog={catalog} prices={prices} selectedPatientId={selectedPatient.id} setSelectedPatientId={id => {
+      return <Lab patients={patients} catalog={catalog} prices={prices} selectedPatientId={selectedPatient.id} setSelectedPatientId={id => {
         setSelectedPatientId(id);
         const nextCode = patients.find(patient => patient.id === id)?.tests[0] ?? catalog[0]?.code ?? "";
         setSelectedTestCode(nextCode);
-      }} selectedTestCode={selectedTest.code} setSelectedTestCode={code => setSelectedTestCode(code)} results={{ ...persistedDraftResults, ...savedResults, ...resultDrafts }} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} onPrintResult={handlePrintResult} onCollectSample={handleCollectSample} savingResult={batchResultMutation.isPending} collectingSample={collectMutation.isPending} /><TeamCommunication role="lab" patient={selectedPatient} /></>;
+      }} selectedTestCode={selectedTest.code} setSelectedTestCode={code => setSelectedTestCode(code)} results={{ ...persistedDraftResults, ...savedResults, ...resultDrafts }} resultDraft={resultDraft} setResultDraft={setResultDraft} onSaveResult={handleSaveResult} onPrintResult={handlePrintResult} onCollectSample={handleCollectSample} savingResult={batchResultMutation.isPending} collectingSample={collectMutation.isPending} />;
     }
     if (activeSection === "tests") {
       return <CatalogPanel catalog={catalog} prices={prices} canEditDefinitions={effectiveRole === "admin"} canEditPrices={effectiveRole === "admin" || effectiveRole === "supervisor"} onToast={setToast} onChanged={() => { void trpcUtils.catalog.list.invalidate(); void trpcUtils.pricing.get.invalidate(); }} />;
@@ -623,7 +624,7 @@ export default function Home() {
             )}
             {effectiveRole === "lab" && <div className="shift-switcher"><span className="shift-dot" /><span className="lab-top-label">محطة المختبر</span></div>}
             <div className="date-chip"><CalendarDays size={15} />{formatClinicDate()}</div>
-            <button className="icon-button notification-button" aria-label="التنبيهات"><Bell size={18} /><i /></button>
+            <NotificationCenter role={effectiveRole} userId={authQuery.data.id} onOpenChat={() => setTeamChatOpen(true)} onNavigate={section => { setActiveSection(section); setMobileMenu(false); }} />
           </div>
         </header>
         <div className="content-wrap">
@@ -637,6 +638,7 @@ export default function Home() {
       {editorInvoiceId != null && <InvoiceEditor invoiceId={editorInvoiceId} catalog={catalog} prices={prices} onClose={() => setEditorInvoiceId(null)} onSaved={invalidateWorkspace} onToast={setToast} />}
       {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
       {drawerPatient && <PatientDrawer patient={drawerPatient} catalog={catalog} prices={prices} onClose={() => setDrawerPatient(null)} onPrintInvoice={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("invoice", snapshot); }} onPrintMedicalReport={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("patient-report", snapshot); }} onEditInvoice={() => { if (drawerPatient.databaseInvoiceId) { setEditorInvoiceId(drawerPatient.databaseInvoiceId); setDrawerPatient(null); } }} onAddInvoice={() => { const number = drawerPatient.id; setDrawerPatient(null); openExistingInvoice(number); }} onNavigate={section => { setActiveSection(section); }} />}
+      {(effectiveRole === "cashier" || effectiveRole === "lab") && <TeamCommunication role={effectiveRole} patient={effectiveRole === "lab" ? selectedPatient : undefined} open={teamChatOpen} onOpenChange={setTeamChatOpen} />}
       {toast && <div className="toast"><BadgeCheck size={17} /><span>{toast}</span><button onClick={() => setToast("")} aria-label="إغلاق التنبيه"><X size={14} /></button></div>}
     </div>
   );
