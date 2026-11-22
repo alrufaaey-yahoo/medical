@@ -5,6 +5,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { and, desc, eq, gte, inArray, lt, ne, or } from "drizzle-orm";
 import { clinicSettings, invoices, patients, shifts, userShiftAssignments, users } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { initializeSqlite } from "../sqlite-init";
 import { buildOperationalReport } from "../operational-reports";
 import { createReportDownloadResponse } from "../report-download";
 import { renderOperationalReportPdf } from "../report-pdf";
@@ -49,6 +50,7 @@ async function cashierCanViewShift(userId: number, dateKey: unknown, shiftType: 
 }
 
 async function startServer() {
+  await initializeSqlite();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

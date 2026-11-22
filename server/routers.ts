@@ -190,8 +190,8 @@ export const appRouter = router({
       const openId = `local_${randomBytes(20).toString("hex")}`;
       try {
         return await db.transaction(async tx => {
-          const [existingSettings] = await tx.select({ id: clinicSettings.id }).from(clinicSettings).limit(1).for("update");
-          const [existingAdmin] = await tx.select({ id: users.id }).from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).where(and(eq(users.role, "admin"), eq(localLoginAccounts.active, 1))).limit(1).for("update");
+          const [existingSettings] = await tx.select({ id: clinicSettings.id }).from(clinicSettings).limit(1);
+          const [existingAdmin] = await tx.select({ id: users.id }).from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).where(and(eq(users.role, "admin"), eq(localLoginAccounts.active, 1))).limit(1);
           if (existingSettings && existingAdmin) throw new TRPCError({ code: "CONFLICT", message: "تمت تهيئة النظام مسبقًا. أعد تحميل الصفحة لتسجيل الدخول." });
           const [duplicateUsername] = await tx.select({ id: users.id }).from(users).where(eq(users.username, input.admin.username)).limit(1);
           if (duplicateUsername) throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل" });
@@ -201,7 +201,7 @@ export const appRouter = router({
           const [createdAdmin] = await tx.select({ id: users.id }).from(users).where(eq(users.openId, openId)).limit(1);
           if (!createdAdmin) throw new Error("تعذر إنشاء حساب المدير");
           await tx.insert(localLoginAccounts).values({ userId: createdAdmin.id, passwordHash, createdBy: createdAdmin.id, active: 1 });
-          await tx.insert(paymentBanks).values([{ name: "بنكك" }, { name: "أوكاش" }, { name: "فوري" }]).onDuplicateKeyUpdate({ set: { active: 1 } });
+          await tx.insert(paymentBanks).values([{ name: "بنكك" }, { name: "أوكاش" }, { name: "فوري" }]).onConflictDoUpdate({ target: paymentBanks.name, set: { active: 1 } });
           return { success: true } as const;
         });
       } catch (error) {
@@ -296,7 +296,7 @@ export const appRouter = router({
         email: `${openId}@preview.local`,
         loginMethod: "preview",
         role: input.role,
-      }).onDuplicateKeyUpdate({ set: { name: PREVIEW_NAMES[input.role], role: input.role } });
+      }).onConflictDoUpdate({ target: users.openId, set: { name: PREVIEW_NAMES[input.role], role: input.role } });
       const token = await sdk.createSessionToken(openId, { name: PREVIEW_NAMES[input.role], expiresInMs: ONE_YEAR_MS });
       ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
       return { success: true, role: input.role } as const;
@@ -371,7 +371,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const result = await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId));
-      if (result[0].affectedRows === 0) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
+      if (result.rowsAffected === 0) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
       return { success: true, userId: input.userId, role: input.role } as const;
     }),
   }),
@@ -410,12 +410,12 @@ export const appRouter = router({
         role: input.role,
         userId: account?.id ?? null,
         createdBy: ctx.user.id,
-      });
+      }).returning({ id: staffMembers.id });
       // Link an existing account immediately when it has no operational role yet.
       if (account && account.role === "user") {
         await db.update(users).set({ role: input.role }).where(eq(users.id, account.id));
       }
-      return { id: result[0].insertId, linked: Boolean(account) } as const;
+      return { id: result[0]?.id, linked: Boolean(account) } as const;
     }),
     update: roleProcedure("supervisor").input(z.object({
       id: z.number().int().positive(),
@@ -470,20 +470,20 @@ export const appRouter = router({
         await db.update(clinicSettings).set(input).where(eq(clinicSettings.id, existing.id));
         return { id: existing.id, updated: true };
       }
-      const result = await db.insert(clinicSettings).values(input);
-      return { id: result[0].insertId, updated: false };
+      const result = await db.insert(clinicSettings).values(input).returning({ id: clinicSettings.id });
+      return { id: result[0]?.id, updated: false };
     }),
     listPaymentBanks: roleProcedure("cashier", "admin").query(async () => {
       const db = await getDb();
       if (!db) return [{ id: 0, name: "بنكك", active: 1 }, { id: 0, name: "أوكاش", active: 1 }, { id: 0, name: "فوري", active: 1 }];
       const existing = await db.select({ id: paymentBanks.id }).from(paymentBanks).limit(1);
-      if (!existing.length) await db.insert(paymentBanks).values([{ name: "بنكك" }, { name: "أوكاش" }, { name: "فوري" }]).onDuplicateKeyUpdate({ set: { active: 1 } });
+      if (!existing.length) await db.insert(paymentBanks).values([{ name: "بنكك" }, { name: "أوكاش" }, { name: "فوري" }]).onConflictDoUpdate({ target: paymentBanks.name, set: { active: 1 } });
       return db.select().from(paymentBanks).where(eq(paymentBanks.active, 1)).orderBy(paymentBanks.id);
     }),
     addPaymentBank: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(120) })).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
-      await db.insert(paymentBanks).values({ name: input.name }).onDuplicateKeyUpdate({ set: { active: 1 } });
+      await db.insert(paymentBanks).values({ name: input.name }).onConflictDoUpdate({ target: paymentBanks.name, set: { active: 1 } });
       return { success: true };
     }),
     removePaymentBank: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
@@ -589,20 +589,20 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [knownShift] = await tx.select().from(shifts)
           .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
+          .limit(1);
         if (!knownShift) await tx.insert(shifts).values({
           shiftDate: input.shiftDate,
           shiftType: input.shiftType,
           cashierUserId: ctx.user.id,
-        }).onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
+        }).onConflictDoUpdate({ target: [shifts.shiftDate, shifts.shiftType], set: { shiftDate: input.shiftDate } });
         const [shift] = await tx.select().from(shifts)
           .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
+          .limit(1);
         if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
         if (shift.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية مغلقة؛ افتح وردية بديلة قبل التسجيل" });
         if (ctx.user.role === "cashier") {
           await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: ctx.user.id, assignedBy: ctx.user.id })
-            .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
+            .onConflictDoUpdate({ target: [userShiftAssignments.shiftId, userShiftAssignments.userId], set: { assignedBy: ctx.user.id } });
         }
 
         const tests = codes.length
@@ -630,8 +630,8 @@ export const appRouter = router({
           age: input.age,
           phone: input.phone,
           address: input.address,
-        });
-        const patientId = patientResult[0].insertId;
+        }).returning({ id: patients.id });
+        const patientId = patientResult[0].id;
         const invoiceNumber = toInvoiceNumber(patientNumber);
         const consultationLine = consultationType === "none"
           ? []
@@ -652,8 +652,8 @@ export const appRouter = router({
           consultationType,
           consultationFee,
           createdBy: ctx.user.id,
-        });
-        const invoiceId = invoiceResult[0].insertId;
+        }).returning({ id: invoices.id });
+        const invoiceId = invoiceResult[0].id;
         await tx.insert(invoiceItems).values([...consultationLine, ...testLines].map(line => ({ ...line, invoiceId })));
         if (tests.length) {
           await tx.insert(labOrders).values(tests.map(test => ({
@@ -688,23 +688,23 @@ export const appRouter = router({
       }
 
       return db.transaction(async tx => {
-        const [patient] = await tx.select().from(patients).where(eq(patients.patientNumber, input.patientNumber)).limit(1).for("update");
+        const [patient] = await tx.select().from(patients).where(eq(patients.patientNumber, input.patientNumber)).limit(1);
         if (!patient) throw new TRPCError({ code: "NOT_FOUND", message: "ملف المريض غير موجود" });
         const [knownShift] = await tx.select().from(shifts)
           .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
+          .limit(1);
         if (!knownShift) await tx.insert(shifts).values({
           shiftDate: input.shiftDate,
           shiftType: input.shiftType,
           cashierUserId: ctx.user.id,
-        }).onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
+        }).onConflictDoUpdate({ target: [shifts.shiftDate, shifts.shiftType], set: { shiftDate: input.shiftDate } });
         const [shift] = await tx.select().from(shifts)
           .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
+          .limit(1);
         if (!shift || shift.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية المطلوبة غير مفتوحة" });
         if (ctx.user.role === "cashier") {
           await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: ctx.user.id, assignedBy: ctx.user.id })
-            .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
+            .onConflictDoUpdate({ target: [userShiftAssignments.shiftId, userShiftAssignments.userId], set: { assignedBy: ctx.user.id } });
         }
         const tests = codes.length
           ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)))
@@ -733,8 +733,8 @@ export const appRouter = router({
           consultationType,
           consultationFee,
           createdBy: ctx.user.id,
-        });
-        const invoiceId = invoiceResult[0].insertId;
+        }).returning({ id: invoices.id });
+        const invoiceId = invoiceResult[0].id;
         await tx.insert(invoiceItems).values(lines.map(line => ({ ...line, invoiceId })));
         if (tests.length) {
           await tx.insert(labOrders).values(tests.map(test => ({
@@ -790,7 +790,7 @@ export const appRouter = router({
         shiftType: input.shiftType,
         cashierUserId: input.cashierUserId,
         labUserId: input.labUserId,
-      }).onDuplicateKeyUpdate({ set: {
+      }).onConflictDoUpdate({ target: [shifts.shiftDate, shifts.shiftType], set: {
         cashierUserId: input.cashierUserId,
         labUserId: input.labUserId,
       } });
@@ -807,7 +807,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
-        const [shift] = await tx.select().from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+        const [shift] = await tx.select().from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
         if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "الوردية غير موجودة" });
         if (shift.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل وردية مغلقة" });
         const uniqueIds = [...new Set(input.userIds)];
@@ -851,7 +851,7 @@ export const appRouter = router({
       if (input.originalUserId === input.substituteUserId) throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن أن يكون البديل هو الموظف الأصلي" });
       return db.transaction(async tx => {
         const [shift] = await tx.select().from(shifts)
-          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
         if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "الوردية غير موجودة" });
         if (shift.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تسليم وردية مغلقة" });
         const assignedOriginal = input.staffRole === "cashier" ? shift.cashierUserId : shift.labUserId;
@@ -868,7 +868,7 @@ export const appRouter = router({
           substituteUserId: input.substituteUserId,
           reason: input.reason,
           approvedBy: ctx.user.id,
-        }).onDuplicateKeyUpdate({ set: {
+        }).onConflictDoUpdate({ target: [shiftHandoffs.shiftId, shiftHandoffs.staffRole], set: {
           originalUserId: input.originalUserId,
           substituteUserId: input.substituteUserId,
           reason: input.reason,
@@ -876,7 +876,7 @@ export const appRouter = router({
           approvedAt: new Date(),
         } });
         await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: input.substituteUserId, assignedBy: ctx.user.id })
-          .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
+          .onConflictDoUpdate({ target: [userShiftAssignments.shiftId, userShiftAssignments.userId], set: { assignedBy: ctx.user.id } });
         const [handoff] = await tx.select().from(shiftHandoffs)
           .where(and(eq(shiftHandoffs.shiftId, shift.id), eq(shiftHandoffs.staffRole, input.staffRole))).limit(1);
         return handoff;
@@ -899,7 +899,7 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [shift] = await tx.select().from(shifts)
           .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
+          .limit(1);
         if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "الوردية غير موجودة" });
         if (shift.status === "closed") return shift;
         await tx.update(shifts).set({ status: "closed", closedAt: new Date() }).where(eq(shifts.id, shift.id));
@@ -918,15 +918,15 @@ export const appRouter = router({
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
         const [existing] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
-          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
         if (existing) {
           if (existing.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية مغلقة" });
           return existing;
         }
         await tx.insert(shifts).values({ shiftDate: input.shiftDate, shiftType: input.shiftType, cashierUserId: ctx.user.id })
-          .onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
+          .onConflictDoUpdate({ target: [shifts.shiftDate, shifts.shiftType], set: { shiftDate: input.shiftDate } });
         const [shift] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
-          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1);
         if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
         return shift;
       });
@@ -962,7 +962,7 @@ export const appRouter = router({
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
         const [invoice] = await tx.select({ id: invoices.id, status: invoices.status }).from(invoices)
-          .where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
+          .where(eq(invoices.id, input.invoiceId)).limit(1);
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
         if (invoice.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة ملغاة" });
         if (invoice.status === "refunded") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة مسترجعة" });
@@ -981,7 +981,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
-        const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
+        const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1);
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
         if (invoice.status === "cancelled" || invoice.status === "refunded") return invoice;
         await tx.update(invoices).set({ status: "cancelled" }).where(eq(invoices.id, invoice.id));
@@ -995,7 +995,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
-        const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
+        const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1);
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
         if (invoice.status !== "paid") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن استرجاع فاتورة غير محصلة" });
         await tx.update(invoices).set({ status: "refunded", refundedAt: new Date(), refundedBy: ctx.user.id, refundReason: input.reason }).where(eq(invoices.id, invoice.id));
@@ -1009,7 +1009,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
-        const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
+        const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1);
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
         if (invoice.status === "cancelled" || invoice.status === "refunded") {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل هذه الفاتورة" });
@@ -1039,7 +1039,7 @@ export const appRouter = router({
       if (order.invoiceStatus !== "paid" || order.status === "blocked") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن حفظ مسودة قبل اكتمال الدفع" });
       if (order.status === "completed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "النتيجة معتمدة بالفعل" });
       await db.insert(labResultDrafts).values({ labOrderId: input.labOrderId, technicianUserId: ctx.user.id, valuesJson: JSON.stringify(input.values) })
-        .onDuplicateKeyUpdate({ set: { technicianUserId: ctx.user.id, valuesJson: JSON.stringify(input.values) } });
+        .onConflictDoUpdate({ target: labResultDrafts.labOrderId, set: { technicianUserId: ctx.user.id, valuesJson: JSON.stringify(input.values) } });
       return { success: true } as const;
     }),
     pending: roleProcedure("lab").query(async () => {
@@ -1127,7 +1127,7 @@ export const appRouter = router({
       if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
       if (invoice.status !== "pending") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "التنبيه متاح للفواتير التي تنتظر الدفع فقط" });
       await db.insert(cashierAttention).values({ invoiceId: input.invoiceId, flaggedBy: ctx.user.id, note: input.note || null })
-        .onDuplicateKeyUpdate({ set: { flaggedBy: ctx.user.id, flaggedAt: new Date(), note: input.note || null, resolvedBy: null, resolvedAt: null } });
+        .onConflictDoUpdate({ target: cashierAttention.invoiceId, set: { flaggedBy: ctx.user.id, flaggedAt: new Date(), note: input.note || null, resolvedBy: null, resolvedAt: null } });
       return { success: true } as const;
     }),
     resolveCashierAlert: roleProcedure("cashier").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
@@ -1263,8 +1263,8 @@ export const appRouter = router({
         }
         return { id: existing.id, created: false } as const;
       }
-      const result = await db.insert(labTests).values(input);
-      return { id: result[0].insertId, created: true } as const;
+      const result = await db.insert(labTests).values(input).returning({ id: labTests.id });
+      return { id: result[0]?.id, created: true } as const;
     }),
     updatePrices: roleProcedure("supervisor").input(z.object({
       items: z.array(z.object({
