@@ -162,7 +162,7 @@ export const appRouter = router({
     /** Preview-only password sign-in for isolated test accounts. */
     previewLogin: publicProcedure.input(z.object({
       role: z.enum(["admin", "supervisor", "cashier", "lab"]),
-      password: z.string().min(8).max(128),
+      password: z.string().min(6).max(128),
     })).mutation(async ({ input, ctx }) => {
       if (!isPreviewLoginEnabled()) {
         throw new TRPCError({ code: "FORBIDDEN", message: "الدخول التجريبي غير مفعّل في هذه البيئة" });
