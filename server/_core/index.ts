@@ -8,7 +8,6 @@ import { getDb } from "../db";
 import { buildOperationalReport } from "../operational-reports";
 import { createReportDownloadResponse } from "../report-download";
 import { renderOperationalReportPdf } from "../report-pdf";
-import { registerOAuthRoutes } from "./oauth";
 import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -225,7 +224,6 @@ async function startServer() {
       res.status(result.status).json(result.body);
     }
   });
-  registerOAuthRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",

@@ -68,11 +68,11 @@ pnpm dev
 | --- | --- |
 | `DATABASE_URL` | `mysql://user:pass@127.0.0.1:3306/medical` |
 | `PORT` | منفذ الخادم (افتراضي 3000) |
-| `MANUS_JWT_SECRET` | سر توقيع الجلسات؛ يجب أن يكون ثابتًا في الإنتاج |
-| `MANUS_PROJECT_ID` | معرف المشروع على منصة Manus |
+| `SESSION_SECRET` | سر توقيع جلسات الحسابات المحلية؛ مطلوب في الإنتاج ويجب أن يكون عشوائيًا وثابتًا. يقبل `MANUS_JWT_SECRET` كاسم قديم للتوافق |
+| `SESSION_APP_ID` | معرف التطبيق داخل الجلسة (اختياري؛ القيمة الافتراضية `medical-clinic`). يقبل `MANUS_PROJECT_ID` القديم للتوافق |
 | `ALLOW_PREVIEW_LOGIN` | `1` لتفعيل دخول المعاينة بالأدوار (يُزال في الإنتاج) |
 | `CHROMIUM_PATH` | مسار Chromium إن لم يكن `/usr/bin/chromium` |
-| `MANUS_OAUTH_API_URL` | اختياري لدخول Manus الموحد |
+| `MANUS_OAUTH_API_URL` | متغير قديم اختياري؛ تسجيل الدخول الحالي يستخدم اسم المستخدم وكلمة المرور ولا يعتمد على OAuth |
 
 ### البناء والتشغيل الإنتاجي
 
