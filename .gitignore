@@ -114,3 +114,7 @@ client/public/__manus__/version.json
 
 # Local CBC bridge credentials/configuration
 cbc-bridge/*.env
+
+# Python bytecode
+__pycache__/
+*.py[cod]
