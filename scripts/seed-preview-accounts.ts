@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { chmod, writeFile } from "node:fs/promises";
 import path from "node:path";
 import mysql from "mysql2/promise";
-import { hashPreviewPassword } from "../server/_core/preview-auth";
+import { hashPreviewPassword, verifyPreviewPassword } from "../server/_core/preview-auth";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required to seed preview accounts");
@@ -18,13 +18,24 @@ const roles = [
   ["cashier", "الكاشير"],
   ["lab", "فني المختبر"],
 ] as const;
+const sharedPassword = process.env.PREVIEW_TEST_PASSWORD;
+if (sharedPassword && sharedPassword.length < 6) throw new Error("PREVIEW_TEST_PASSWORD must be at least 6 characters");
 const connection = await mysql.createConnection({ uri: databaseUrl });
-const [existing] = await connection.query("SELECT role FROM preview_login_accounts");
-const existingRoles = new Set((existing as Array<{ role: string }>).map(row => row.role));
+const [existing] = await connection.query("SELECT role, passwordHash FROM preview_login_accounts");
+const existingByRole = new Map((existing as Array<{ role: string; passwordHash: string }>).map(row => [row.role, row.passwordHash]));
 const credentials: Array<{ role: string; label: string; password: string }> = [];
 
 for (const [role, label] of roles) {
-  if (existingRoles.has(role)) continue;
+  const currentHash = existingByRole.get(role);
+  if (sharedPassword) {
+    if (currentHash && verifyPreviewPassword(sharedPassword, currentHash)) continue;
+    await connection.execute(
+      "INSERT INTO preview_login_accounts (role, passwordHash) VALUES (?, ?) ON DUPLICATE KEY UPDATE passwordHash = VALUES(passwordHash)",
+      [role, hashPreviewPassword(sharedPassword)],
+    );
+    continue;
+  }
+  if (currentHash) continue;
   const password = randomBytes(24).toString("base64url");
   await connection.execute(
     "INSERT INTO preview_login_accounts (role, passwordHash) VALUES (?, ?)",
@@ -34,7 +45,9 @@ for (const [role, label] of roles) {
 }
 await connection.end();
 
-if (credentials.length) {
+if (sharedPassword) {
+  console.log("Preview account passwords verified or updated from the protected development secret.");
+} else if (credentials.length) {
   const projectId = process.env.MANUS_PROJECT_ID || "clinic-preview";
   const outputPath = path.join("/home/ubuntu", `.clinic-preview-credentials-${projectId}`);
   await writeFile(outputPath, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600, flag: "wx" });

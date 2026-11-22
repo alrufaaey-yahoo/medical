@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONSULTATION_PRICES, type ConsultationType } from "@shared/billing";
 import { trpc } from "@/lib/trpc";
 import { buildCatalog, DEFAULT_CATALOG, type LabTest } from "@/lib/catalog";
@@ -31,19 +31,25 @@ import {
 import { formatCurrency } from "@/lib/clinic-utils";
 import type { FieldValue, OrderStatus, Patient, PrintMode, ReportRange, Role, Section, Shift } from "@/lib/clinic-types";
 import { EMPTY_PATIENT, roleLabels, roleSections, sectionLabels, serverShiftByLabel } from "@/lib/clinic-types";
-import { Billing } from "@/components/clinic/Billing";
-import { CatalogPanel } from "@/components/clinic/Catalog";
-import { LoginDialog, ExistingInvoiceDialog, InvoiceEditor, PatientDialog, PatientDrawer } from "@/components/clinic/dialogs";
-import { Lab } from "@/components/clinic/Lab";
-import { Overview } from "@/components/clinic/Overview";
-import { Patients } from "@/components/clinic/Patients";
-import { PrintDocument } from "@/components/clinic/print";
-import { Reports } from "@/components/clinic/Reports";
-import { Settings, type ClinicSettingsDraft } from "@/components/clinic/Settings";
-import { TeamPanel } from "@/components/clinic/Team";
+import type { ClinicSettingsDraft } from "@/components/clinic/Settings";
 import { TeamCommunication } from "@/components/clinic/TeamCommunication";
 import { NotificationCenter } from "@/components/clinic/NotificationCenter";
 import { AppLogo, SectionTitle } from "@/components/clinic/ui";
+
+const Billing = lazy(() => import("@/components/clinic/Billing").then(module => ({ default: module.Billing })));
+const CatalogPanel = lazy(() => import("@/components/clinic/Catalog").then(module => ({ default: module.CatalogPanel })));
+const LoginDialog = lazy(() => import("@/components/clinic/dialogs").then(module => ({ default: module.LoginDialog })));
+const ExistingInvoiceDialog = lazy(() => import("@/components/clinic/dialogs").then(module => ({ default: module.ExistingInvoiceDialog })));
+const InvoiceEditor = lazy(() => import("@/components/clinic/dialogs").then(module => ({ default: module.InvoiceEditor })));
+const PatientDialog = lazy(() => import("@/components/clinic/dialogs").then(module => ({ default: module.PatientDialog })));
+const PatientDrawer = lazy(() => import("@/components/clinic/dialogs").then(module => ({ default: module.PatientDrawer })));
+const Lab = lazy(() => import("@/components/clinic/Lab").then(module => ({ default: module.Lab })));
+const Overview = lazy(() => import("@/components/clinic/Overview").then(module => ({ default: module.Overview })));
+const Patients = lazy(() => import("@/components/clinic/Patients").then(module => ({ default: module.Patients })));
+const PrintDocument = lazy(() => import("@/components/clinic/print").then(module => ({ default: module.PrintDocument })));
+const Reports = lazy(() => import("@/components/clinic/Reports").then(module => ({ default: module.Reports })));
+const Settings = lazy(() => import("@/components/clinic/Settings").then(module => ({ default: module.Settings })));
+const TeamPanel = lazy(() => import("@/components/clinic/Team").then(module => ({ default: module.TeamPanel })));
 
 type NavItem = { id: Section; label: string; icon: LucideIcon };
 
@@ -574,14 +580,20 @@ export default function Home() {
             {(Object.keys(roleLabels) as Role[]).map(role => <div key={role}><ShieldCheck size={16} /><strong>{roleLabels[role]}</strong></div>)}
           </div>
         </div>
-        {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
+        <Suspense fallback={<div className="app-splash"><AppLogo /><span>جارٍ تحميل شاشة الدخول...</span></div>}>
+          {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
+        </Suspense>
         {toast && <div className="toast"><BadgeCheck size={17} /><span>{toast}</span><button onClick={() => setToast("")}><X size={14} /></button></div>}
       </div>
     );
   }
 
   if (printMode) {
-    return <PrintDocument mode={printMode} patient={printPatientSnapshot ?? selectedPatient} selectedTest={selectedTest} result={savedResults[`${selectedPatient.id}-${selectedTest.code}`] ?? resultDraft} results={{ ...persistedDraftResults, ...savedResults, ...resultDrafts }} reportPatients={billingPatients.length ? billingPatients : patients} reportRange={printReportRange} clinic={printClinic} catalog={catalog} prices={prices} onClose={() => { setPrintMode(null); setPrintPatientSnapshot(null); }} />;
+    return (
+      <Suspense fallback={<div className="app-splash"><AppLogo /><span>جارٍ تجهيز المستند للطباعة...</span></div>}>
+        <PrintDocument mode={printMode} patient={printPatientSnapshot ?? selectedPatient} selectedTest={selectedTest} result={savedResults[`${selectedPatient.id}-${selectedTest.code}`] ?? resultDraft} results={{ ...persistedDraftResults, ...savedResults, ...resultDrafts }} reportPatients={billingPatients.length ? billingPatients : patients} reportRange={printReportRange} clinic={printClinic} catalog={catalog} prices={prices} onClose={() => { setPrintMode(null); setPrintPatientSnapshot(null); }} />
+      </Suspense>
+    );
   }
 
   const navBadge = (id: Section) => {
@@ -629,15 +641,19 @@ export default function Home() {
         </header>
         <div className="content-wrap">
           <div className="mobile-title-row"><AppLogo compact /><span className="mobile-page-title">{pageTitle}</span></div>
-          {renderSection()}
+          <Suspense fallback={<div className="panel empty-state"><span>جارٍ تحميل القسم...</span></div>}>
+            {renderSection()}
+          </Suspense>
         </div>
       </main>
 
-      {showPatientDialog && <PatientDialog catalog={catalog} prices={prices} onClose={() => setShowPatientDialog(false)} saving={registerMutation.isPending} onSave={handleNewPatient} />}
-      {existingInvoiceFor !== undefined && <ExistingInvoiceDialog patients={patients} catalog={catalog} prices={prices} initialPatientNumber={existingInvoiceFor ?? undefined} onClose={() => setExistingInvoiceFor(undefined)} saving={followUpMutation.isPending} onSave={handleAddInvoice} />}
-      {editorInvoiceId != null && <InvoiceEditor invoiceId={editorInvoiceId} catalog={catalog} prices={prices} onClose={() => setEditorInvoiceId(null)} onSaved={invalidateWorkspace} onToast={setToast} />}
-      {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
-      {drawerPatient && <PatientDrawer patient={drawerPatient} catalog={catalog} prices={prices} onClose={() => setDrawerPatient(null)} onPrintInvoice={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("invoice", snapshot); }} onPrintMedicalReport={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("patient-report", snapshot); }} onEditInvoice={() => { if (drawerPatient.databaseInvoiceId) { setEditorInvoiceId(drawerPatient.databaseInvoiceId); setDrawerPatient(null); } }} onAddInvoice={() => { const number = drawerPatient.id; setDrawerPatient(null); openExistingInvoice(number); }} onNavigate={section => { setActiveSection(section); }} />}
+      <Suspense fallback={null}>
+        {showPatientDialog && <PatientDialog catalog={catalog} prices={prices} onClose={() => setShowPatientDialog(false)} saving={registerMutation.isPending} onSave={handleNewPatient} />}
+        {existingInvoiceFor !== undefined && <ExistingInvoiceDialog patients={patients} catalog={catalog} prices={prices} initialPatientNumber={existingInvoiceFor ?? undefined} onClose={() => setExistingInvoiceFor(undefined)} saving={followUpMutation.isPending} onSave={handleAddInvoice} />}
+        {editorInvoiceId != null && <InvoiceEditor invoiceId={editorInvoiceId} catalog={catalog} prices={prices} onClose={() => setEditorInvoiceId(null)} onSaved={invalidateWorkspace} onToast={setToast} />}
+        {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
+        {drawerPatient && <PatientDrawer patient={drawerPatient} catalog={catalog} prices={prices} onClose={() => setDrawerPatient(null)} onPrintInvoice={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("invoice", snapshot); }} onPrintMedicalReport={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("patient-report", snapshot); }} onEditInvoice={() => { if (drawerPatient.databaseInvoiceId) { setEditorInvoiceId(drawerPatient.databaseInvoiceId); setDrawerPatient(null); } }} onAddInvoice={() => { const number = drawerPatient.id; setDrawerPatient(null); openExistingInvoice(number); }} onNavigate={section => { setActiveSection(section); }} />}
+      </Suspense>
       {(effectiveRole === "cashier" || effectiveRole === "lab") && <TeamCommunication role={effectiveRole} patient={effectiveRole === "lab" ? selectedPatient : undefined} open={teamChatOpen} onOpenChange={setTeamChatOpen} />}
       {toast && <div className="toast"><BadgeCheck size={17} /><span>{toast}</span><button onClick={() => setToast("")} aria-label="إغلاق التنبيه"><X size={14} /></button></div>}
     </div>
