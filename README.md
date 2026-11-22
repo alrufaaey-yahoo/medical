@@ -60,7 +60,7 @@ pnpm db:seed           # الكتالوج والإعدادات وحساب الم
 pnpm dev
 ```
 
-في قاعدة البيانات الفارغة ينشئ `pnpm db:seed` حساب المدير الأول مرة واحدة: اسم المستخدم `alrufaaey` وكلمة المرور `123456`. غيّر كلمة المرور فور تسجيل الدخول من «بيانات الحساب». لن تعيد عملية التهيئة تعيين كلمة المرور أو استبدال حساب مدير موجود.
+في قاعدة البيانات الفارغة ينشئ `pnpm db:seed` حساب المدير الأول مرة واحدة باسم المستخدم `alrufaaey`. يجب توفير `BOOTSTRAP_ADMIN_PASSWORD` خارج المستودع، أو سيولد seed كلمة مرور عشوائية ويحفظها مرة واحدة في ملف محلي بصلاحيات `0600`؛ يجب تغييرها عند أول تسجيل دخول. لن تعيد عملية التهيئة تعيين كلمة المرور أو استبدال حساب مدير موجود.
 
 ### متغيرات البيئة
 
@@ -73,6 +73,7 @@ pnpm dev
 | `ALLOW_PREVIEW_LOGIN` | `1` لتفعيل دخول المعاينة بالأدوار (يُزال في الإنتاج) |
 | `CHROMIUM_PATH` | مسار Chromium إن لم يكن `/usr/bin/chromium` |
 | `MANUS_OAUTH_API_URL` | اختياري لدخول Manus الموحد |
+| `BOOTSTRAP_ADMIN_PASSWORD` | كلمة مرور المدير الأول؛ لا تُحفظ في المستودع، وتُستخدم مرة واحدة فقط عند seed |
 
 ### البناء والتشغيل الإنتاجي
 
@@ -87,7 +88,7 @@ NODE_ENV=production node dist/index.js
 
 - الهجرات: ملفات `drizzle/*.sql` بترتيبها الرقمي حتى `0011_usernames.sql`، وتُطبَّق عبر `pnpm db:migrate:app`.
 - البذور: `scripts/seed.ts` (كتالوج الفحوصات، إعدادات المستوصف، سعرا المعاينة، وحساب المدير الافتراضي في قاعدة فارغة فقط).
-- الجداول الرئيسية: `patients`, `invoices`, `invoice_items`, `invoice_adjustments`, `lab_orders`, `lab_results`, `lab_tests`, `price_changes`, `shifts`, `user_shift_assignments`, `staff_members`, `clinic_settings`, `users`.
+- الجداول الرئيسية: `patients`, `invoices`, `invoice_items`, `invoice_adjustments`, `lab_orders`, `lab_results`, `lab_tests`, `price_changes`, `shifts`, `user_shift_assignments`, `staff_members`, `clinic_settings`, `users`, `audit_log`.
 - بيانات الدخول التجريبي تُنشأ تلقائيًا عند `ALLOW_PREVIEW_LOGIN=1` (مدير، مشرف، كاشير، فني مختبر) وتظهر كأزرار في شاشة الدخول.
 
 ## التقارير PDF

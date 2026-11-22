@@ -25,6 +25,9 @@ export const localLoginAccounts = mysqlTable("local_login_accounts", {
   userId: int("userId").notNull(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
   active: int("active").default(1).notNull(),
+  mustChangePassword: int("mustChangePassword").default(0).notNull(),
+  failedAttempts: int("failedAttempts").default(0).notNull(),
+  lockedUntil: timestamp("lockedUntil"),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -105,9 +108,15 @@ export const patients = mysqlTable("patients", {
   age: int("age"),
   phone: varchar("phone", { length: 60 }),
   address: varchar("address", { length: 255 }),
+  registeredBy: int("registeredBy"),
+  registeredShiftId: int("registeredShiftId"),
+  shiftDate: varchar("shiftDate", { length: 10 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => [
+  index("patients_registered_by_idx").on(table.registeredBy, table.shiftDate),
+  index("patients_registered_shift_idx").on(table.registeredShiftId, table.createdAt),
+]);
 
 export const labTests = mysqlTable("lab_tests", {
   id: int("id").autoincrement().primaryKey(),
@@ -128,6 +137,7 @@ export const invoices = mysqlTable("invoices", {
   invoiceNumber: varchar("invoiceNumber", { length: 40 }).notNull().unique(),
   patientId: int("patientId").notNull(),
   shiftId: int("shiftId"),
+  shiftDate: varchar("shiftDate", { length: 10 }),
   total: int("total").default(0).notNull(),
   // Snapshot of the doctor consultation sold with this invoice.
   consultationType: mysqlEnum("consultationType", ["none", "general", "specialist"]).default("none").notNull(),
@@ -135,14 +145,21 @@ export const invoices = mysqlTable("invoices", {
   status: mysqlEnum("status", ["pending", "paid", "cancelled", "refunded"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 40 }),
   paymentBank: varchar("paymentBank", { length: 120 }),
-  transactionNumber: varchar("transactionNumber", { length: 4 }),
+  transactionNumber: varchar("transactionNumber", { length: 64 }),
   createdBy: int("createdBy"),
+  collectedBy: int("collectedBy"),
+  collectedShiftId: int("collectedShiftId"),
+  collectedAt: timestamp("collectedAt"),
   paidAt: timestamp("paidAt"),
   refundedAt: timestamp("refundedAt"),
   refundedBy: int("refundedBy"),
   refundReason: varchar("refundReason", { length: 500 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => [
+  index("invoices_created_by_shift_idx").on(table.createdBy, table.shiftId, table.shiftDate),
+  index("invoices_collected_by_shift_idx").on(table.collectedBy, table.collectedShiftId, table.collectedAt),
+  index("invoices_shift_created_idx").on(table.shiftId, table.createdAt),
+]);
 
 export const paymentBanks = mysqlTable("payment_banks", {
   id: int("id").autoincrement().primaryKey(),
@@ -249,6 +266,23 @@ export const priceChanges = mysqlTable("price_changes", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const auditLog = mysqlTable("audit_log", {
+  id: int("id").autoincrement().primaryKey(),
+  actorId: int("actorId"),
+  action: varchar("action", { length: 80 }).notNull(),
+  entity: varchar("entity", { length: 80 }).notNull(),
+  entityId: int("entityId"),
+  beforeJson: text("beforeJson"),
+  afterJson: text("afterJson"),
+  shiftId: int("shiftId"),
+  reason: varchar("reason", { length: 500 }),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [
+  index("audit_log_entity_idx").on(table.entity, table.entityId, table.createdAt),
+  index("audit_log_actor_idx").on(table.actorId, table.createdAt),
+]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ClinicSettings = typeof clinicSettings.$inferSelect;
@@ -260,3 +294,4 @@ export type LabResult = typeof labResults.$inferSelect;
 export type InvoiceAdjustment = typeof invoiceAdjustments.$inferSelect;
 export type StaffMember = typeof staffMembers.$inferSelect;
 export type PriceChange = typeof priceChanges.$inferSelect;
+export type AuditLog = typeof auditLog.$inferSelect;

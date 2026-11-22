@@ -17,6 +17,7 @@ import { and, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  auditLog,
   clinicSettings,
   cbcBridgeConfig,
   invoiceAdjustments,
@@ -148,6 +149,68 @@ const PREVIEW_NAMES: Record<"admin" | "supervisor" | "cashier" | "lab", string> 
   lab: "فني المختبر (معاينة)",
 };
 
+type DbExecutor = any;
+
+async function assertCashierShiftAccess(tx: DbExecutor, shiftId: number, userId: number, mutation = false) {
+  const [shift] = await tx.select().from(shifts).where(eq(shifts.id, shiftId)).limit(1).for("update");
+  if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "الوردية المرتبطة بالسجل غير موجودة" });
+  const [assignment] = await tx.select({ id: userShiftAssignments.id }).from(userShiftAssignments)
+    .where(and(eq(userShiftAssignments.shiftId, shift.id), eq(userShiftAssignments.userId, userId))).limit(1);
+  if (shift.cashierUserId !== userId && !assignment) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية الوصول إلى بيانات كاشير آخر" });
+  }
+  if (mutation && shift.status !== "open") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل عملية مرتبطة بورديّة مغلقة" });
+  }
+  return shift;
+}
+
+async function assertCashierCanUseShift(tx: DbExecutor, shiftDate: string, shiftType: "morning" | "evening" | "night", userId: number) {
+  const [shift] = await tx.select().from(shifts)
+    .where(and(eq(shifts.shiftDate, shiftDate), eq(shifts.shiftType, shiftType))).limit(1).for("update");
+  if (!shift) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا توجد وردية مسندة لهذا التاريخ والنوع" });
+  return assertCashierShiftAccess(tx, shift.id, userId, true);
+}
+
+async function assertLabOrderAccess(tx: DbExecutor, orderId: number, userId: number, requiredStatus?: "queued" | "in_progress") {
+  const [row] = await tx.select({ order: labOrders, shift: shifts }).from(labOrders)
+    .innerJoin(invoices, eq(invoices.id, labOrders.invoiceId))
+    .innerJoin(shifts, eq(shifts.id, invoices.shiftId))
+    .where(eq(labOrders.id, orderId)).limit(1).for("update");
+  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "طلب المختبر غير موجود" });
+  const [assignment] = await tx.select({ id: userShiftAssignments.id }).from(userShiftAssignments)
+    .where(and(eq(userShiftAssignments.shiftId, row.shift.id), eq(userShiftAssignments.userId, userId))).limit(1);
+  if (row.shift.labUserId !== userId && !assignment) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "طلب المختبر غير مسند إلى الفني الحالي" });
+  }
+  if (requiredStatus && row.order.status !== requiredStatus) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: requiredStatus === "in_progress" ? "يجب استلام العينة قبل إدخال النتيجة" : "حالة طلب المختبر لا تسمح بهذا الإجراء" });
+  }
+  return row;
+}
+
+async function writeAudit(tx: DbExecutor, input: {
+  actorId: number;
+  action: string;
+  entity: string;
+  entityId?: number | null;
+  shiftId?: number | null;
+  reason?: string | null;
+  before?: unknown;
+  after?: unknown;
+}) {
+  await tx.insert(auditLog).values({
+    actorId: input.actorId,
+    action: input.action,
+    entity: input.entity,
+    entityId: input.entityId ?? null,
+    shiftId: input.shiftId ?? null,
+    reason: input.reason ?? null,
+    beforeJson: input.before == null ? null : JSON.stringify(input.before),
+    afterJson: input.after == null ? null : JSON.stringify(input.after),
+  });
+}
+
 type InvoiceEditResult = {
   invoice: typeof invoices.$inferSelect;
   added: string[];
@@ -204,7 +267,7 @@ export const appRouter = router({
         await db.transaction(async tx => {
           await tx.update(users).set({ username: input.username, name: input.name }).where(eq(users.id, ctx.user.id));
           if (input.newPassword) {
-            await tx.update(localLoginAccounts).set({ passwordHash: await hashLocalPassword(input.newPassword) }).where(eq(localLoginAccounts.userId, ctx.user.id));
+            await tx.update(localLoginAccounts).set({ passwordHash: await hashLocalPassword(input.newPassword), mustChangePassword: 0, failedAttempts: 0, lockedUntil: null }).where(eq(localLoginAccounts.userId, ctx.user.id));
           }
         });
       } catch (error) {
@@ -501,19 +564,46 @@ export const appRouter = router({
   }),
 
   patients: router({
-    list: roleProcedure("cashier", "lab").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input }) => {
+    list: roleProcedure("cashier", "lab").input(z.object({ search: z.string().trim().max(100).optional() }).optional()).query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return [];
       const search = input?.search;
-      return db.select().from(patients).where(search ? like(patients.name, `%${search}%`) : undefined).orderBy(desc(patients.createdAt)).limit(100);
+      if (ctx.user.role === "lab") {
+        return db.select({
+          id: patients.id, patientNumber: patients.patientNumber, name: patients.name,
+          gender: patients.gender, age: patients.age, createdAt: patients.createdAt,
+        }).from(patients).innerJoin(labOrders, eq(labOrders.patientId, patients.id))
+          .where(and(inArray(labOrders.status, ["queued", "in_progress"]), search ? like(patients.name, `%${search}%`) : undefined))
+          .orderBy(desc(patients.createdAt)).limit(100);
+      }
+      const invoicePatientRows = await db.select({ patientId: invoices.patientId }).from(invoices).where(eq(invoices.createdBy, ctx.user.id)).limit(500);
+      const ownedIds = [...new Set(invoicePatientRows.map(row => row.patientId))];
+      const ownership = ownedIds.length ? or(eq(patients.registeredBy, ctx.user.id), inArray(patients.id, ownedIds)) : eq(patients.registeredBy, ctx.user.id);
+      return db.select().from(patients).where(and(ownership, search ? like(patients.name, `%${search}%`) : undefined)).orderBy(desc(patients.createdAt)).limit(100);
     }),
-    workspace: roleProcedure("cashier", "lab").query(async () => {
+    workspace: roleProcedure("cashier", "lab").query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
-      const patientRows = await db.select().from(patients).orderBy(desc(patients.createdAt)).limit(100);
+      if (ctx.user.role === "lab") {
+        const orderRows = await db.select().from(labOrders)
+          .where(inArray(labOrders.status, ["queued", "in_progress"])).orderBy(desc(labOrders.createdAt)).limit(500);
+        const patientIds = [...new Set(orderRows.map(order => order.patientId))];
+        const patientRows = patientIds.length
+          ? await db.select({ id: patients.id, patientNumber: patients.patientNumber, name: patients.name, gender: patients.gender, age: patients.age, createdAt: patients.createdAt })
+            .from(patients).where(inArray(patients.id, patientIds))
+          : [];
+        const testIds = [...new Set(orderRows.map(order => order.labTestId))];
+        const testRows = testIds.length ? await db.select().from(labTests).where(inArray(labTests.id, testIds)) : [];
+        const resultRows = orderRows.length ? await db.select().from(labResults).where(inArray(labResults.labOrderId, orderRows.map(order => order.id))) : [];
+        return { patients: patientRows, invoices: [], invoiceItems: [], labOrders: orderRows, labTests: testRows, labResults: resultRows };
+      }
+      const invoicePatientRows = await db.select({ patientId: invoices.patientId }).from(invoices).where(eq(invoices.createdBy, ctx.user.id)).limit(500);
+      const ownedIds = [...new Set(invoicePatientRows.map(row => row.patientId))];
+      const ownership = ownedIds.length ? or(eq(patients.registeredBy, ctx.user.id), inArray(patients.id, ownedIds)) : eq(patients.registeredBy, ctx.user.id);
+      const patientRows = await db.select().from(patients).where(ownership).orderBy(desc(patients.createdAt)).limit(100);
       if (patientRows.length === 0) return { patients: [], invoices: [], invoiceItems: [], labOrders: [], labTests: [], labResults: [] };
       const patientIds = patientRows.map(patient => patient.id);
-      const invoiceRows = await db.select().from(invoices).where(inArray(invoices.patientId, patientIds)).orderBy(desc(invoices.createdAt)).limit(500);
+      const invoiceRows = await db.select().from(invoices).where(and(inArray(invoices.patientId, patientIds), eq(invoices.createdBy, ctx.user.id))).orderBy(desc(invoices.createdAt)).limit(500);
       const invoiceIds = invoiceRows.map(invoice => invoice.id);
       const [itemRows, orderRows, testRows] = await Promise.all([
         invoiceIds.length ? db.select().from(invoiceItems).where(inArray(invoiceItems.invoiceId, invoiceIds)) : Promise.resolve([]),
@@ -535,23 +625,7 @@ export const appRouter = router({
       }
 
       return db.transaction(async tx => {
-        const [knownShift] = await tx.select().from(shifts)
-          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
-        if (!knownShift) await tx.insert(shifts).values({
-          shiftDate: input.shiftDate,
-          shiftType: input.shiftType,
-          cashierUserId: ctx.user.id,
-        }).onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
-        const [shift] = await tx.select().from(shifts)
-          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
-        if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
-        if (shift.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية مغلقة؛ افتح وردية بديلة قبل التسجيل" });
-        if (ctx.user.role === "cashier") {
-          await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: ctx.user.id, assignedBy: ctx.user.id })
-            .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
-        }
+        const shift = await assertCashierCanUseShift(tx, input.shiftDate, input.shiftType, ctx.user.id);
 
         const tests = codes.length
           ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)))
@@ -578,6 +652,9 @@ export const appRouter = router({
           age: input.age,
           phone: input.phone,
           address: input.address,
+          registeredBy: ctx.user.id,
+          registeredShiftId: shift.id,
+          shiftDate: input.shiftDate,
         });
         const patientId = patientResult[0].insertId;
         const invoiceNumber = toInvoiceNumber(patientNumber);
@@ -596,6 +673,7 @@ export const appRouter = router({
           invoiceNumber,
           patientId,
           shiftId: shift.id,
+          shiftDate: input.shiftDate,
           total,
           consultationType,
           consultationFee,
@@ -612,6 +690,14 @@ export const appRouter = router({
             status: "blocked" as const,
           })));
         }
+        await writeAudit(tx, {
+          actorId: ctx.user.id,
+          action: "create",
+          entity: "patient_visit",
+          entityId: patientId,
+          shiftId: shift.id,
+          after: { patientId, invoiceId, patientNumber, shiftId: shift.id },
+        });
         return {
           id: patientId,
           patientNumber,
@@ -638,22 +724,7 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [patient] = await tx.select().from(patients).where(eq(patients.patientNumber, input.patientNumber)).limit(1).for("update");
         if (!patient) throw new TRPCError({ code: "NOT_FOUND", message: "ملف المريض غير موجود" });
-        const [knownShift] = await tx.select().from(shifts)
-          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
-        if (!knownShift) await tx.insert(shifts).values({
-          shiftDate: input.shiftDate,
-          shiftType: input.shiftType,
-          cashierUserId: ctx.user.id,
-        }).onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
-        const [shift] = await tx.select().from(shifts)
-          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType)))
-          .limit(1).for("update");
-        if (!shift || shift.status !== "open") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية المطلوبة غير مفتوحة" });
-        if (ctx.user.role === "cashier") {
-          await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: ctx.user.id, assignedBy: ctx.user.id })
-            .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
-        }
+        const shift = await assertCashierCanUseShift(tx, input.shiftDate, input.shiftType, ctx.user.id);
         const tests = codes.length
           ? await tx.select().from(labTests).where(and(inArray(labTests.code, codes), eq(labTests.active, 1)))
           : [];
@@ -677,6 +748,7 @@ export const appRouter = router({
           invoiceNumber,
           patientId: patient.id,
           shiftId: shift.id,
+          shiftDate: input.shiftDate,
           total,
           consultationType,
           consultationFee,
@@ -793,43 +865,42 @@ export const appRouter = router({
         return closed;
       });
     }),
-    current: protectedProcedure.input(z.object({ shiftDate: z.string(), shiftType: shiftTypeInput })).query(async ({ input }) => {
+    current: protectedProcedure.input(z.object({ shiftDate: clinicDate, shiftType: shiftTypeInput })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return null;
       const [shift] = await db.select().from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).orderBy(desc(shifts.id)).limit(1);
       return shift ?? null;
     }),
-    open: roleProcedure("cashier").input(z.object({ shiftDate: z.string(), shiftType: shiftTypeInput })).mutation(async ({ input, ctx }) => {
+    open: roleProcedure("cashier").input(z.object({ shiftDate: clinicDate, shiftType: shiftTypeInput })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
-        const [existing] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
+        const [existing] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent, cashierUserId: shifts.cashierUserId })
           .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
         if (existing) {
+          await assertCashierShiftAccess(tx, existing.id, ctx.user.id);
           if (existing.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "الوردية مغلقة" });
           return existing;
         }
-        await tx.insert(shifts).values({ shiftDate: input.shiftDate, shiftType: input.shiftType, cashierUserId: ctx.user.id })
-          .onDuplicateKeyUpdate({ set: { shiftDate: input.shiftDate } });
-        const [shift] = await tx.select({ id: shifts.id, status: shifts.status, sequenceCurrent: shifts.sequenceCurrent })
-          .from(shifts).where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
-        if (!shift) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر فتح الوردية" });
-        return shift;
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا توجد وردية مسندة؛ اطلب من المدير تعيينك قبل الفتح" });
       });
     }),
   }),
 
   billing: router({
-    recent: roleProcedure("cashier").query(async () => {
+    recent: roleProcedure("cashier").query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(invoices).orderBy(desc(invoices.createdAt)).limit(100);
+      return db.select().from(invoices)
+        .where(or(eq(invoices.createdBy, ctx.user.id), eq(invoices.collectedBy, ctx.user.id)))
+        .orderBy(desc(invoices.createdAt)).limit(100);
     }),
-    detail: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive() })).query(async ({ input }) => {
+    detail: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive() })).query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const [invoice] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1);
       if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+      await assertCashierShiftAccess(db, invoice.shiftId ?? 0, ctx.user.id);
       const [patient] = await db.select().from(patients).where(eq(patients.id, invoice.patientId)).limit(1);
       const [items, orders] = await Promise.all([
         db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id)),
@@ -839,17 +910,18 @@ export const appRouter = router({
       const tests = testIds.length ? await db.select().from(labTests).where(inArray(labTests.id, testIds)) : [];
       return { invoice, patient: patient ?? null, items, orders, tests };
     }),
-    markPaid: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive(), paymentMethod: z.enum(["cash", "bank"]), paymentBank: z.string().trim().min(1).max(120).optional(), transactionNumber: z.string().regex(/^\d{4}$/).optional() }).superRefine((value, ctx) => {
+    markPaid: roleProcedure("cashier").input(z.object({ invoiceId: z.number().int().positive(), paymentMethod: z.enum(["cash", "bank"]), paymentBank: z.string().trim().min(1).max(120).optional(), transactionNumber: z.string().trim().min(1).max(64).optional() }).superRefine((value, ctx) => {
       if (value.paymentMethod === "bank" && !value.paymentBank) ctx.addIssue({ code: "custom", message: "اختر البنك" });
-      if (value.paymentMethod === "bank" && !value.transactionNumber) ctx.addIssue({ code: "custom", message: "رقم العملية يجب أن يتكون من 4 أرقام" });
+      if (value.paymentMethod === "bank" && !value.transactionNumber) ctx.addIssue({ code: "custom", message: "رقم العملية يجب أن يتراوح بين 1 و64 محرفًا" });
       if (value.paymentMethod === "cash" && (value.paymentBank || value.transactionNumber)) ctx.addIssue({ code: "custom", message: "بيانات البنك غير مطلوبة للدفع النقدي" });
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       return db.transaction(async tx => {
-        const [invoice] = await tx.select({ id: invoices.id, status: invoices.status }).from(invoices)
+        const [invoice] = await tx.select({ id: invoices.id, status: invoices.status, shiftId: invoices.shiftId }).from(invoices)
           .where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+        const shift = await assertCashierShiftAccess(tx, invoice.shiftId ?? 0, ctx.user.id, true);
         if (invoice.status === "cancelled") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة ملغاة" });
         if (invoice.status === "refunded") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تحصيل فاتورة مسترجعة" });
         if (invoice.status === "paid") return { success: true, alreadyPaid: true } as const;
@@ -857,9 +929,11 @@ export const appRouter = router({
           const [bank] = await tx.select({ id: paymentBanks.id }).from(paymentBanks).where(and(eq(paymentBanks.name, input.paymentBank!), eq(paymentBanks.active, 1))).limit(1);
           if (!bank) throw new TRPCError({ code: "BAD_REQUEST", message: "البنك المحدد غير متاح" });
         }
-        await tx.update(invoices).set({ status: "paid", paymentMethod: input.paymentMethod, paymentBank: input.paymentBank ?? null, transactionNumber: input.transactionNumber ?? null, paidAt: new Date() }).where(eq(invoices.id, input.invoiceId));
+        const paidAt = new Date();
+        await tx.update(invoices).set({ status: "paid", paymentMethod: input.paymentMethod, paymentBank: input.paymentBank ?? null, transactionNumber: input.transactionNumber ?? null, paidAt, collectedAt: paidAt, collectedBy: ctx.user.id, collectedShiftId: shift.id }).where(eq(invoices.id, input.invoiceId));
         await tx.update(labOrders).set({ status: "queued" })
           .where(and(eq(labOrders.invoiceId, input.invoiceId), eq(labOrders.status, "blocked")));
+        await writeAudit(tx, { actorId: ctx.user.id, action: "collect", entity: "invoice", entityId: invoice.id, shiftId: shift.id, after: { status: "paid", paymentMethod: input.paymentMethod } });
         return { success: true, alreadyPaid: false } as const;
       });
     }),
@@ -869,10 +943,12 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+        const shift = await assertCashierShiftAccess(tx, invoice.shiftId ?? 0, ctx.user.id, true);
         if (invoice.status === "cancelled" || invoice.status === "refunded") return invoice;
         await tx.update(invoices).set({ status: "cancelled" }).where(eq(invoices.id, invoice.id));
         await tx.update(labOrders).set({ status: "blocked" }).where(eq(labOrders.invoiceId, invoice.id));
         await tx.insert(invoiceAdjustments).values({ invoiceId: invoice.id, type: "cancel", amountBefore: invoice.total, amountAfter: 0, delta: -invoice.total, reason: input.reason, createdBy: ctx.user.id });
+        await writeAudit(tx, { actorId: ctx.user.id, action: "cancel", entity: "invoice", entityId: invoice.id, shiftId: shift.id, reason: input.reason, before: { status: invoice.status }, after: { status: "cancelled" } });
         const [updated] = await tx.select().from(invoices).where(eq(invoices.id, invoice.id)).limit(1);
         return updated;
       });
@@ -883,10 +959,12 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+        const shift = await assertCashierShiftAccess(tx, invoice.shiftId ?? 0, ctx.user.id, true);
         if (invoice.status !== "paid") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن استرجاع فاتورة غير محصلة" });
         await tx.update(invoices).set({ status: "refunded", refundedAt: new Date(), refundedBy: ctx.user.id, refundReason: input.reason }).where(eq(invoices.id, invoice.id));
         await tx.update(labOrders).set({ status: "blocked" }).where(eq(labOrders.invoiceId, invoice.id));
         await tx.insert(invoiceAdjustments).values({ invoiceId: invoice.id, type: "refund", amountBefore: invoice.total, amountAfter: 0, delta: -invoice.total, reason: input.reason, createdBy: ctx.user.id });
+        await writeAudit(tx, { actorId: ctx.user.id, action: "refund", entity: "invoice", entityId: invoice.id, shiftId: shift.id, reason: input.reason, before: { status: invoice.status }, after: { status: "refunded" } });
         const [updated] = await tx.select().from(invoices).where(eq(invoices.id, invoice.id)).limit(1);
         return updated;
       });
@@ -897,6 +975,7 @@ export const appRouter = router({
       return db.transaction(async tx => {
         const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1).for("update");
         if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+        await assertCashierShiftAccess(tx, invoice.shiftId ?? 0, ctx.user.id, true);
         if (invoice.status === "cancelled" || invoice.status === "refunded") {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل هذه الفاتورة" });
         }
@@ -918,6 +997,7 @@ export const appRouter = router({
     saveDraft: roleProcedure("lab").input(resultInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      await assertLabOrderAccess(db, input.labOrderId, ctx.user.id, "in_progress");
       const [order] = await db.select({ id: labOrders.id, status: labOrders.status, invoiceStatus: invoices.status })
         .from(labOrders).innerJoin(invoices, eq(invoices.id, labOrders.invoiceId))
         .where(eq(labOrders.id, input.labOrderId)).limit(1);
@@ -933,10 +1013,11 @@ export const appRouter = router({
       if (!db) return [];
       return db.select().from(labOrders).where(eq(labOrders.status, "queued")).orderBy(desc(labOrders.createdAt)).limit(100);
     }),
-    collectSample: roleProcedure("lab").input(z.object({ labOrderId: z.number().int().positive() })).mutation(async ({ input }) => {
+    collectSample: roleProcedure("lab").input(z.object({ labOrderId: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const [order] = await db.select().from(labOrders).where(eq(labOrders.id, input.labOrderId)).limit(1);
+      await assertLabOrderAccess(db, input.labOrderId, ctx.user.id, "queued");
       if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "طلب المختبر غير موجود" });
       const [invoice] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, order.invoiceId)).limit(1);
       if (!invoice || invoice.status !== "paid") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن سحب العينة قبل اكتمال الدفع" });
@@ -947,6 +1028,7 @@ export const appRouter = router({
     saveResult: roleProcedure("lab").input(resultInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      await assertLabOrderAccess(db, input.labOrderId, ctx.user.id, "in_progress");
       const [order] = await db.select().from(labOrders).where(eq(labOrders.id, input.labOrderId)).limit(1);
       if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "طلب المختبر غير موجود" });
       const [invoice] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, order.invoiceId)).limit(1);
@@ -968,6 +1050,7 @@ export const appRouter = router({
       if (new Set(input.results.map(result => result.labOrderId)).size !== input.results.length) throw new TRPCError({ code: "BAD_REQUEST", message: "توجد طلبات مكررة في الحفظ" });
       await db.transaction(async tx => {
         for (const result of input.results) {
+          await assertLabOrderAccess(tx, result.labOrderId, ctx.user.id, "in_progress");
           const [order] = await tx.select().from(labOrders).where(eq(labOrders.id, result.labOrderId)).limit(1);
           if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "أحد طلبات المختبر غير موجود" });
           const [invoice] = await tx.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, order.invoiceId)).limit(1);
