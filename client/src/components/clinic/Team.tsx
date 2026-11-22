@@ -243,7 +243,7 @@ function ShiftAssignments({ onToast }: { onToast: (message: string) => void }) {
   };
 
   const closeShift = (shiftType: ShiftTypeValue) => {
-    if (!window.confirm("إغلاق الوردية يمنع تسجيل مرضى جدد فيها. هل تريد المتابعة؟")) return;
+    if (!window.confirm("قبل إغلاق الوردية: راجع الفواتير والتحصيلات واحفظ أي عمل معلّق، واستخرج تقرير الوردية من قسم التقارير. بعد الإغلاق لن يمكن تسجيل مرضى جدد فيها. هل تريد المتابعة؟")) return;
     closeMutation.mutate({ shiftDate: date, shiftType }, {
       onSuccess: () => { void assignmentsQuery.refetch(); onToast(`تم إغلاق الوردية ${shiftTypes.find(item => item.value === shiftType)?.label}`); },
       onError: error => onToast(error.message || "تعذر إغلاق الوردية"),
