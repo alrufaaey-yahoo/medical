@@ -173,10 +173,15 @@ export const appRouter = router({
   setup: router({
     status: publicProcedure.query(async () => {
       const db = await getDb();
-      if (!db) return { required: false, databaseAvailable: false } as const;
-      const [settings] = await db.select({ id: clinicSettings.id }).from(clinicSettings).limit(1);
-      const [admin] = await db.select({ id: users.id }).from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).where(and(eq(users.role, "admin"), eq(localLoginAccounts.active, 1))).limit(1);
-      return { required: !settings || !admin, databaseAvailable: true } as const;
+      if (!db) return { required: true, databaseAvailable: false, databaseMessage: "قاعدة البيانات غير مهيأة في الخادم. أضف DATABASE_URL ثم أعد تشغيل التطبيق." } as const;
+      try {
+        const [settings] = await db.select({ id: clinicSettings.id }).from(clinicSettings).limit(1);
+        const [admin] = await db.select({ id: users.id }).from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).where(and(eq(users.role, "admin"), eq(localLoginAccounts.active, 1))).limit(1);
+        return { required: !settings || !admin, databaseAvailable: true, databaseMessage: null } as const;
+      } catch (error) {
+        console.error("[Setup] Could not read setup status:", error);
+        return { required: true, databaseAvailable: false, databaseMessage: "تعذر الاتصال بقاعدة البيانات. تحقق من DATABASE_URL وتطبيق الهجرات ثم أعد المحاولة." } as const;
+      }
     }),
     complete: publicProcedure.input(setupInput).mutation(async ({ input }) => {
       const db = await getDb();

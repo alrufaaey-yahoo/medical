@@ -612,8 +612,19 @@ export default function Home() {
     return <div className="app-splash"><AppLogo /><span>جارٍ التحقق من تهيئة المستوصف...</span></div>;
   }
 
+  if (setupQuery.isError) {
+    return (
+      <div className="setup-screen">
+        <div className="setup-card">
+          <div className="setup-header"><AppLogo /><span className="eyebrow">تهيئة النظام لأول تشغيل</span><h1>تعذر فحص حالة التهيئة</h1><p>لم يصل التطبيق إلى خادم التشغيل. لن يتم تجاوز شاشة التهيئة بصمت.</p></div>
+          <div className="setup-body"><div className="setup-error setup-database-error"><span>تحقق من تشغيل الخادم وربط مسار ‎/api/trpc‎، ثم أعد المحاولة.</span><button type="button" className="button button-secondary" onClick={() => { void setupQuery.refetch(); }}><span>إعادة المحاولة</span></button></div></div>
+        </div>
+      </div>
+    );
+  }
+
   if (setupQuery.data?.required) {
-    return <Suspense fallback={<div className="app-splash"><AppLogo /><span>جارٍ تحميل شاشة التهيئة...</span></div>}><SetupWizard onCompleted={() => { void setupQuery.refetch(); void authQuery.refetch(); }} /></Suspense>;
+    return <Suspense fallback={<div className="app-splash"><AppLogo /><span>جارٍ تحميل شاشة التهيئة...</span></div>}><SetupWizard databaseAvailable={setupQuery.data.databaseAvailable} databaseMessage={setupQuery.data.databaseMessage} onRetry={() => { void setupQuery.refetch(); }} onCompleted={() => { void setupQuery.refetch(); void authQuery.refetch(); }} /></Suspense>;
   }
 
   if (!authQuery.data || !operationalRole) {

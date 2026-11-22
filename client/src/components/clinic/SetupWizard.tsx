@@ -1,18 +1,25 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import {
+  AlertCircle,
   BadgeCheck,
   Building2,
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 import { DEFAULT_CONSULTATION_PRICES } from "@shared/billing";
 import { trpc } from "@/lib/trpc";
 import { AppLogo } from "./ui";
 
-type SetupWizardProps = { onCompleted: () => void };
+type SetupWizardProps = {
+  onCompleted: () => void;
+  databaseAvailable?: boolean;
+  databaseMessage?: string | null;
+  onRetry?: () => void;
+};
 
 type FormState = {
   name: string;
@@ -46,7 +53,12 @@ const initialState: FormState = {
   confirmPassword: "",
 };
 
-export function SetupWizard({ onCompleted }: SetupWizardProps) {
+export function SetupWizard({
+  onCompleted,
+  databaseAvailable = true,
+  databaseMessage,
+  onRetry,
+}: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(initialState);
   const [error, setError] = useState("");
@@ -78,6 +90,10 @@ export function SetupWizard({ onCompleted }: SetupWizardProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setError("");
+    if (!databaseAvailable) {
+      setError(databaseMessage ?? "قاعدة البيانات غير متاحة حاليًا.");
+      return;
+    }
     setupMutation.mutate({
       clinic: {
         name: form.name.trim(),
@@ -141,6 +157,18 @@ export function SetupWizard({ onCompleted }: SetupWizardProps) {
             )}
           </div>
         </div>
+        {!databaseAvailable && (
+          <div className="setup-error setup-database-error">
+            <AlertCircle size={16} />
+            <span>{databaseMessage ?? "قاعدة البيانات غير متاحة حاليًا."}</span>
+            {onRetry && (
+              <button type="button" className="button button-secondary" onClick={onRetry}>
+                <RefreshCw size={14} />
+                إعادة المحاولة
+              </button>
+            )}
+          </div>
+        )}
         <form onSubmit={submit} className="setup-body">
           {step === 0 && (
             <div className="setup-fields">
@@ -244,11 +272,13 @@ export function SetupWizard({ onCompleted }: SetupWizardProps) {
               <button
                 type="submit"
                 className="button button-primary"
-                disabled={setupMutation.isPending}
+                disabled={setupMutation.isPending || !databaseAvailable}
               >
                 {setupMutation.isPending
                   ? "جارٍ حفظ التهيئة..."
-                  : "إتمام التهيئة"}
+                  : databaseAvailable
+                    ? "إتمام التهيئة"
+                    : "بانتظار اتصال قاعدة البيانات"}
                 <BadgeCheck size={16} />
               </button>
             )}
