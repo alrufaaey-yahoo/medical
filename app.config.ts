@@ -1,3 +1,3 @@
 export default {
-  logoUrl: "https://raw.githubusercontent.com/alrufaaey-yahoo/medical/main/client/public/logo.svg",
+  logoUrl: "https://files.manuscdn.com/user_upload_by_module/session_file/310519663341886941/bluNKwULFBAjIfEj.svg",
 };
