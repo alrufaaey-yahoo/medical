@@ -1,5 +1,5 @@
-import { AlertCircle, BadgeCheck, CalendarDays, Mail, Pencil, Phone, ShieldCheck, UserPlus, Users, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertCircle, BadgeCheck, CalendarDays, KeyRound, Mail, Pencil, Phone, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatClinicTime, getClinicDateKey } from "@/lib/clinic-workflow";
 import { initials } from "@/lib/clinic-utils";
@@ -24,6 +24,7 @@ export function TeamPanel({ role, onToast }: { role: Role; onToast: (message: st
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
   const [accountName, setAccountName] = useState("");
+  const [accountUsername, setAccountUsername] = useState("");
   const [accountRole, setAccountRole] = useState<"admin" | "supervisor" | "cashier" | "lab">("cashier");
   const [accountPassword, setAccountPassword] = useState("");
   const staffQuery = trpc.staff.list.useQuery(undefined, { retry: false });
@@ -106,12 +107,13 @@ export function TeamPanel({ role, onToast }: { role: Role; onToast: (message: st
         <div className="panel-header"><div><span className="eyebrow">دخول فردي بكلمة مرور</span><h2>حسابات الموظفين</h2></div><ShieldCheck size={18} className="muted-icon" /></div>
         <p className="settings-readonly-note">المدير يستطيع إنشاء جميع الأدوار بما فيها المديرين. مشرف النظام يستطيع إنشاء حسابات الاستقبال/الكاشير والمختبر فقط.</p>
         <div className="form-grid" style={{ marginBottom: 18 }}>
-          <label className="form-field"><span>اسم الموظف *</span><input value={accountName} onChange={event => setAccountName(event.target.value)} placeholder="الاسم الذي سيظهر في الدخول" maxLength={180} /></label>
+          <label className="form-field"><span>اسم الموظف *</span><input value={accountName} onChange={event => setAccountName(event.target.value)} placeholder="الاسم الذي سيظهر في اللوحة" maxLength={180} /></label>
+          <label className="form-field"><span>اسم المستخدم *</span><input dir="ltr" autoComplete="username" value={accountUsername} onChange={event => setAccountUsername(event.target.value)} placeholder="مثال: lab_ahmed" maxLength={32} /></label>
           <label className="form-field"><span>الدور *</span><select value={accountRole} onChange={event => setAccountRole(event.target.value as typeof accountRole)}><option value="cashier">كاشير / استقبال</option><option value="lab">فني المختبر</option>{isAdmin && <><option value="supervisor">مشرف النظام</option><option value="admin">مدير</option></>}</select></label>
           <label className="form-field"><span>كلمة المرور (8 أحرف على الأقل) *</span><input type="password" autoComplete="new-password" minLength={8} maxLength={128} value={accountPassword} onChange={event => setAccountPassword(event.target.value)} /></label>
-          <div className="form-field" style={{ justifyContent: "end" }}><button className="button button-primary" disabled={createAccountMutation.isPending || accountName.trim().length < 2 || accountPassword.length < 8} onClick={() => createAccountMutation.mutate({ name: accountName.trim(), role: accountRole, password: accountPassword }, { onSuccess: () => { setAccountName(""); setAccountPassword(""); void accountsQuery.refetch(); onToast("تم إنشاء حساب الدخول"); }, onError: error => onToast(error.message || "تعذر إنشاء الحساب") })}><UserPlus size={16} />إنشاء حساب</button></div>
+          <div className="form-field" style={{ justifyContent: "end" }}><button className="button button-primary" disabled={createAccountMutation.isPending || accountName.trim().length < 2 || !/^[a-zA-Z0-9._-]{3,32}$/.test(accountUsername.trim()) || accountPassword.length < 8} onClick={() => createAccountMutation.mutate({ name: accountName.trim(), username: accountUsername.trim(), role: accountRole, password: accountPassword }, { onSuccess: () => { setAccountName(""); setAccountUsername(""); setAccountPassword(""); void accountsQuery.refetch(); onToast("تم إنشاء حساب الدخول"); }, onError: error => onToast(error.message || "تعذر إنشاء الحساب") })}><UserPlus size={16} />إنشاء حساب</button></div>
         </div>
-        {accountsQuery.isError ? <div className="empty-state"><AlertCircle size={20} /><strong>تعذر تحميل الحسابات</strong></div> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الدور</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>{(accountsQuery.data ?? []).map(account => <tr key={account.userId}><td><strong>{account.name ?? "بدون اسم"}</strong></td><td>{roleLabels[account.role as Role] ?? account.role}</td><td>{account.active ? "نشط" : "موقوف"}</td><td><button className="button button-secondary" disabled={setAccountActiveMutation.isPending} onClick={() => setAccountActiveMutation.mutate({ userId: account.userId, active: !account.active }, { onSuccess: () => { void accountsQuery.refetch(); onToast(account.active ? "تم إيقاف الحساب" : "تم تفعيل الحساب"); }, onError: error => onToast(error.message) })}>{account.active ? "إيقاف" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
+        {accountsQuery.isError ? <div className="empty-state"><AlertCircle size={20} /><strong>تعذر تحميل الحسابات</strong></div> : <div className="table-wrap"><table><thead><tr><th>اسم المستخدم</th><th>الموظف</th><th>الدور</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>{(accountsQuery.data ?? []).map(account => <tr key={account.userId}><td dir="ltr"><strong>{account.username}</strong></td><td><strong>{account.name ?? "بدون اسم"}</strong></td><td>{roleLabels[account.role as Role] ?? account.role}</td><td>{account.active ? "نشط" : "موقوف"}</td><td><button className="button button-secondary" disabled={setAccountActiveMutation.isPending} onClick={() => setAccountActiveMutation.mutate({ userId: account.userId, active: !account.active }, { onSuccess: () => { void accountsQuery.refetch(); onToast(account.active ? "تم إيقاف الحساب" : "تم تفعيل الحساب"); }, onError: error => onToast(error.message) })}>{account.active ? "إيقاف" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
       </section>
 
       <section className="panel">
@@ -148,11 +150,11 @@ export function TeamPanel({ role, onToast }: { role: Role; onToast: (message: st
             {usersQuery.isError ? <div className="empty-state"><AlertCircle size={22} /><strong>تعذر تحميل الحسابات</strong><span>{usersQuery.error.message}</span></div> : (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>الحساب</th><th>طريقة الدخول</th><th>آخر دخول</th><th>الصلاحية</th></tr></thead>
+                  <thead><tr><th>الحساب / اسم المستخدم</th><th>طريقة الدخول</th><th>آخر دخول</th><th>الصلاحية</th></tr></thead>
                   <tbody>
                     {(usersQuery.data ?? []).map(user => (
                       <tr key={user.id}>
-                        <td><div className="person-cell"><div className="avatar small">{initials(user.name ?? user.email ?? "مستخدم")}</div><div><strong>{user.name ?? "بدون اسم"}</strong><span>{user.email ?? "لا يوجد بريد"}</span></div></div></td>
+                        <td><div className="person-cell"><div className="avatar small">{initials(user.name ?? user.email ?? "مستخدم")}</div><div><strong>{user.name ?? "بدون اسم"}</strong><span dir={user.username ? "ltr" : undefined}>{user.username ? `@${user.username}` : user.email ?? "لا يوجد بريد"}</span></div></div></td>
                         <td>{user.loginMethod ?? "Manus"}</td>
                         <td className="muted-cell">{user.lastSignedIn ? formatClinicTime(new Date(user.lastSignedIn)) : "—"}</td>
                         <td>
@@ -207,6 +209,65 @@ export function TeamPanel({ role, onToast }: { role: Role; onToast: (message: st
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+export function AccountSettingsDialog({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
+  const authQuery = trpc.auth.me.useQuery(undefined, { retry: false });
+  const updateMutation = trpc.auth.updateOwnAccount.useMutation();
+  const trpcUtils = trpc.useUtils();
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  useEffect(() => {
+    if (!authQuery.data) return;
+    setName(authQuery.data.name ?? "");
+    setUsername(authQuery.data.username ?? "");
+  }, [authQuery.data]);
+
+  const isLocalAccount = authQuery.data?.loginMethod === "local-password";
+  const usernameValid = /^[a-zA-Z0-9._-]{3,32}$/.test(username.trim());
+  const passwordValid = !newPassword || (newPassword.length >= 8 && newPassword === confirmPassword);
+  const save = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isLocalAccount || !usernameValid || name.trim().length < 2 || !currentPassword || !passwordValid) return;
+    updateMutation.mutate({ username: username.trim(), name: name.trim(), currentPassword, ...(newPassword ? { newPassword } : {}) }, {
+      onSuccess: () => {
+        void trpcUtils.auth.me.invalidate();
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        onToast("تم تحديث بيانات حسابك");
+      },
+      onError: error => onToast(error.message || "تعذر تحديث بيانات الحساب"),
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="account-settings-title" onMouseDown={event => event.stopPropagation()}>
+        <div className="modal-header"><div><span className="eyebrow">إعدادات المستخدم</span><h2 id="account-settings-title">بيانات حسابي</h2></div><button className="icon-button" onClick={onClose} aria-label="إغلاق"><X size={18} /></button></div>
+        <form onSubmit={save}>
+          <div className="modal-body">
+            {authQuery.isLoading ? <div className="empty-state"><strong>جارٍ تحميل الحساب...</strong></div> : !isLocalAccount ? <div className="settings-readonly-note"><ShieldCheck size={16} />هذا الحساب مرتبط بتسجيل دخول Manus؛ تُدار بياناته من مزوّد تسجيل الدخول.</div> : (
+              <div className="form-grid">
+                <label className="form-field full-field"><span>الاسم الظاهر *</span><input autoFocus maxLength={180} value={name} onChange={event => setName(event.target.value)} /></label>
+                <label className="form-field full-field"><span>اسم المستخدم *</span><input dir="ltr" autoComplete="username" maxLength={32} value={username} onChange={event => setUsername(event.target.value)} /><small>3–32 حرفًا إنجليزيًا أو رقمًا أو نقطة أو شرطة.</small></label>
+                <label className="form-field full-field"><span>كلمة المرور الحالية *</span><input type="password" autoComplete="current-password" maxLength={128} value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} required /></label>
+                <label className="form-field"><span>كلمة المرور الجديدة</span><input type="password" autoComplete="new-password" minLength={8} maxLength={128} value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="اتركها فارغة للإبقاء عليها" /></label>
+                <label className="form-field"><span>تأكيد كلمة المرور الجديدة</span><input type="password" autoComplete="new-password" minLength={8} maxLength={128} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} /></label>
+                {newPassword && newPassword !== confirmPassword && <div className="settings-readonly-note full-field"><KeyRound size={15} />كلمتا المرور الجديدتان غير متطابقتين.</div>}
+                {newPassword && newPassword.length < 8 && <div className="settings-readonly-note full-field"><KeyRound size={15} />يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل.</div>}
+              </div>
+            )}
+          </div>
+          <div className="modal-footer"><button type="button" className="button button-secondary" onClick={onClose}>إغلاق</button>{isLocalAccount && <button type="submit" className="button button-primary" disabled={updateMutation.isPending || !usernameValid || name.trim().length < 2 || !currentPassword || !passwordValid}><BadgeCheck size={16} />{updateMutation.isPending ? "جارٍ الحفظ..." : "حفظ بيانات الحساب"}</button>}</div>
+        </form>
+      </div>
     </div>
   );
 }

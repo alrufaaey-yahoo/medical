@@ -21,6 +21,16 @@ describe("user administration API permissions", () => {
     await expect(caller.users.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("requires an authenticated session before changing the caller's own login details", async () => {
+    const caller = createCaller();
+
+    await expect(caller.auth.updateOwnAccount({
+      username: "newusername",
+      name: "موظف جديد",
+      currentPassword: "wrong-password",
+    })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
   it("denies non-admin staff before changing a role", async () => {
     const caller = createCaller({ id: 2, role: "supervisor" } as TestUser);
 

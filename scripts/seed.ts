@@ -5,6 +5,7 @@
 import "dotenv/config";
 import mysql from "mysql2/promise";
 import { DEFAULT_CATALOG } from "../client/src/lib/catalog";
+import { hashLocalPassword } from "../server/local-auth";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -12,6 +13,33 @@ if (!databaseUrl) {
 }
 
 const connection = await mysql.createConnection({ uri: databaseUrl });
+
+const [defaultAccounts] = await connection.execute("SELECT id FROM users WHERE username = ? LIMIT 1", ["alrufaaey"]);
+const [existingAdmins] = await connection.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+if ((defaultAccounts as unknown[]).length === 0 && (existingAdmins as unknown[]).length === 0) {
+  await connection.beginTransaction();
+  try {
+    const openId = "local_default_admin";
+    await connection.execute(
+      "INSERT INTO users (openId, name, username, loginMethod, role) VALUES (?, ?, ?, ?, ?)",
+      [openId, "مدير النظام", "alrufaaey", "local-password", "admin"],
+    );
+    const [createdUsers] = await connection.execute("SELECT id FROM users WHERE openId = ? LIMIT 1", [openId]);
+    const userId = (createdUsers as Array<{ id: number }>)[0]?.id;
+    if (!userId) throw new Error("تعذر إنشاء حساب المدير الافتراضي");
+    await connection.execute(
+      "INSERT INTO local_login_accounts (userId, passwordHash, active, createdBy) VALUES (?, ?, 1, ?)",
+      [userId, await hashLocalPassword("123456"), userId],
+    );
+    await connection.commit();
+    console.log("created the one-time default administrator account");
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  }
+} else {
+  console.log("an administrator or the default username already exists; no default credentials were changed");
+}
 
 const [settings] = await connection.query("SELECT id FROM clinic_settings LIMIT 1");
 if ((settings as unknown[]).length === 0) {

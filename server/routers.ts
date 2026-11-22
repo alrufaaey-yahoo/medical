@@ -139,6 +139,8 @@ const staffInput = z.object({
   role: z.enum(["cashier", "lab", "supervisor"]),
 });
 
+const usernameInput = z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9._-]+$/, "اسم المستخدم يقبل الحروف الإنجليزية والأرقام والنقطة والشرطة فقط").transform(value => value.toLowerCase());
+
 const PREVIEW_NAMES: Record<"admin" | "supervisor" | "cashier" | "lab", string> = {
   admin: "مدير النظام (معاينة)",
   supervisor: "مشرف التشغيل (معاينة)",
@@ -162,22 +164,56 @@ export const appRouter = router({
     namedAccounts: publicProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
-      return db.select({ id: users.id, name: users.name, role: users.role })
+      return db.select({ id: users.id, username: users.username, name: users.name, role: users.role })
         .from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId))
         .where(and(eq(localLoginAccounts.active, 1), inArray(users.role, ["admin", "supervisor", "cashier", "lab"])))
         .orderBy(users.role, users.name);
     }),
-    namedLogin: publicProcedure.input(z.object({ userId: z.number().int().positive(), password: z.string().min(1).max(128) })).mutation(async ({ input, ctx }) => {
+    namedLogin: publicProcedure.input(z.object({ username: usernameInput, password: z.string().min(1).max(128) })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
       const [row] = await db.select({ userId: users.id, openId: users.openId, name: users.name, passwordHash: localLoginAccounts.passwordHash })
         .from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId))
-        .where(and(eq(localLoginAccounts.userId, input.userId), eq(localLoginAccounts.active, 1))).limit(1);
+        .where(and(eq(users.username, input.username), eq(localLoginAccounts.active, 1))).limit(1);
       if (!row || !(await verifyLocalPassword(input.password, row.passwordHash))) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "كلمة المرور غير صحيحة" });
       }
       await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, row.userId));
       const token = await sdk.createSessionToken(row.openId, { name: row.name ?? "" , expiresInMs: ONE_YEAR_MS });
+      ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
+      return { success: true } as const;
+    }),
+    updateOwnAccount: protectedProcedure.input(z.object({
+      username: usernameInput,
+      name: z.string().trim().min(2).max(180),
+      currentPassword: z.string().min(1).max(128),
+      newPassword: z.string().min(8).max(128).optional(),
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [account] = await db.select({ openId: users.openId, passwordHash: localLoginAccounts.passwordHash })
+        .from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId))
+        .where(and(eq(users.id, ctx.user.id), eq(localLoginAccounts.active, 1))).limit(1);
+      if (!account) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "تعديل بيانات الدخول متاح للحسابات المحلية فقط" });
+      if (!(await verifyLocalPassword(input.currentPassword, account.passwordHash))) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "كلمة المرور الحالية غير صحيحة" });
+      }
+      const [duplicate] = await db.select({ id: users.id }).from(users).where(eq(users.username, input.username)).limit(1);
+      if (duplicate && duplicate.id !== ctx.user.id) throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل" });
+      try {
+        await db.transaction(async tx => {
+          await tx.update(users).set({ username: input.username, name: input.name }).where(eq(users.id, ctx.user.id));
+          if (input.newPassword) {
+            await tx.update(localLoginAccounts).set({ passwordHash: await hashLocalPassword(input.newPassword) }).where(eq(localLoginAccounts.userId, ctx.user.id));
+          }
+        });
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "ER_DUP_ENTRY") {
+          throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل" });
+        }
+        throw error;
+      }
+      const token = await sdk.createSessionToken(account.openId, { name: input.name, expiresInMs: ONE_YEAR_MS });
       ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
       return { success: true } as const;
     }),
@@ -219,18 +255,20 @@ export const appRouter = router({
     list: roleProcedure("supervisor").query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
-      const rows = await db.select({ userId: users.id, name: users.name, role: users.role, active: localLoginAccounts.active, createdAt: localLoginAccounts.createdAt })
+      const rows = await db.select({ userId: users.id, username: users.username, name: users.name, role: users.role, active: localLoginAccounts.active, createdAt: localLoginAccounts.createdAt })
         .from(localLoginAccounts).innerJoin(users, eq(users.id, localLoginAccounts.userId)).orderBy(users.name);
       return ctx.user.role === "admin" ? rows : rows.filter(row => row.role === "cashier" || row.role === "lab");
     }),
-    create: roleProcedure("supervisor").input(z.object({ name: z.string().trim().min(2).max(180), role: z.enum(["admin", "supervisor", "cashier", "lab"]), password: z.string().min(8).max(128) })).mutation(async ({ input, ctx }) => {
+    create: roleProcedure("supervisor").input(z.object({ name: z.string().trim().min(2).max(180), username: usernameInput, role: z.enum(["admin", "supervisor", "cashier", "lab"]), password: z.string().min(8).max(128) })).mutation(async ({ input, ctx }) => {
       if (ctx.user.role === "supervisor" && input.role !== "cashier" && input.role !== "lab") throw new TRPCError({ code: "FORBIDDEN", message: "مشرف النظام يستطيع إنشاء حسابات الاستقبال والمختبر فقط" });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [duplicate] = await db.select({ id: users.id }).from(users).where(eq(users.username, input.username)).limit(1);
+      if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل" });
       const openId = `local_${randomBytes(20).toString("hex")}`;
       const passwordHash = await hashLocalPassword(input.password);
       await db.transaction(async tx => {
-        await tx.insert(users).values({ openId, name: input.name, loginMethod: "local-password", role: input.role });
+        await tx.insert(users).values({ openId, name: input.name, username: input.username, loginMethod: "local-password", role: input.role });
         const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.openId, openId)).limit(1);
         if (!user) throw new Error("تعذر إنشاء سجل المستخدم");
         await tx.insert(localLoginAccounts).values({ userId: user.id, passwordHash, createdBy: ctx.user.id, active: 1 });
@@ -263,6 +301,7 @@ export const appRouter = router({
       return db.select({
         id: users.id,
         name: users.name,
+        username: users.username,
         email: users.email,
         loginMethod: users.loginMethod,
         role: users.role,

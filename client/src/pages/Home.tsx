@@ -52,6 +52,7 @@ const PrintDocument = lazy(() => import("@/components/clinic/print").then(module
 const Reports = lazy(() => import("@/components/clinic/Reports").then(module => ({ default: module.Reports })));
 const Settings = lazy(() => import("@/components/clinic/Settings").then(module => ({ default: module.Settings })));
 const TeamPanel = lazy(() => import("@/components/clinic/Team").then(module => ({ default: module.TeamPanel })));
+const AccountSettingsDialog = lazy(() => import("@/components/clinic/Team").then(module => ({ default: module.AccountSettingsDialog })));
 
 type NavItem = { id: Section; label: string; icon: LucideIcon };
 
@@ -96,6 +97,7 @@ export default function Home() {
   const [existingInvoiceFor, setExistingInvoiceFor] = useState<string | null | undefined>(undefined);
   const [editorInvoiceId, setEditorInvoiceId] = useState<number | null>(null);
   const [showLoginPanel, setShowLoginPanel] = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [showLogoutReminder, setShowLogoutReminder] = useState(false);
   const [drawerPatient, setDrawerPatient] = useState<Patient | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState("");
@@ -635,7 +637,7 @@ export default function Home() {
           <div className="sidebar-help"><div className="help-icon"><ShieldCheck size={17} /></div><div><strong>بياناتك محمية</strong><span>جلسة تشغيل موثقة</span></div></div>
           <div className="user-mini">
             <div className="avatar">{authQuery.data.name?.slice(0, 2) ?? "م"}</div>
-            <div><strong>{authQuery.data.name ?? "مستخدم"}</strong><span>{roleLabels[effectiveRole]}</span><button type="button" className="link-button" onClick={() => setShowLoginPanel(true)}>تغيير الحساب</button></div>
+            <div><strong>{authQuery.data.name ?? "مستخدم"}</strong><span>{roleLabels[effectiveRole]}{authQuery.data.username ? ` · @${authQuery.data.username}` : ""}</span><button type="button" className="link-button" onClick={() => setShowAccountSettings(true)}>بيانات الحساب</button><button type="button" className="link-button" onClick={() => setShowLoginPanel(true)}>تغيير الحساب</button></div>
             <button type="button" className="icon-button" onClick={() => setShowLogoutReminder(true)} aria-label="تسجيل الخروج" title="تسجيل الخروج"><LogOut size={17} /></button>
           </div>
         </div>
@@ -668,6 +670,7 @@ export default function Home() {
         {showPatientDialog && <PatientDialog catalog={catalog} prices={prices} onClose={() => setShowPatientDialog(false)} saving={registerMutation.isPending} onSave={handleNewPatient} />}
         {existingInvoiceFor !== undefined && <ExistingInvoiceDialog patients={patients} catalog={catalog} prices={prices} initialPatientNumber={existingInvoiceFor ?? undefined} onClose={() => setExistingInvoiceFor(undefined)} saving={followUpMutation.isPending} onSave={handleAddInvoice} />}
         {editorInvoiceId != null && <InvoiceEditor invoiceId={editorInvoiceId} catalog={catalog} prices={prices} onClose={() => setEditorInvoiceId(null)} onSaved={invalidateWorkspace} onToast={setToast} />}
+        {showAccountSettings && <AccountSettingsDialog onClose={() => setShowAccountSettings(false)} onToast={setToast} />}
         {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
         {drawerPatient && <PatientDrawer patient={drawerPatient} catalog={catalog} prices={prices} onClose={() => setDrawerPatient(null)} onPrintInvoice={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("invoice", snapshot); }} onPrintMedicalReport={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("patient-report", snapshot); }} onEditInvoice={() => { if (drawerPatient.databaseInvoiceId) { setEditorInvoiceId(drawerPatient.databaseInvoiceId); setDrawerPatient(null); } }} onAddInvoice={() => { const number = drawerPatient.id; setDrawerPatient(null); openExistingInvoice(number); }} onNavigate={section => { setActiveSection(section); }} />}
       </Suspense>

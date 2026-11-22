@@ -55,10 +55,12 @@
 ```bash
 pnpm install
 cp .env.example .env   # إن وُجد، أو اضبط المتغيرات أدناه
-pnpm db:migrate:app    # تطبيق الهجرات 0000 → 0005
-pnpm db:seed           # كتالوج الفحوصات وإعدادات المستوصف
+pnpm db:migrate:app    # تطبيق جميع الهجرات
+pnpm db:seed           # الكتالوج والإعدادات وحساب المدير الأول عند الحاجة
 pnpm dev
 ```
+
+في قاعدة البيانات الفارغة ينشئ `pnpm db:seed` حساب المدير الأول مرة واحدة: اسم المستخدم `alrufaaey` وكلمة المرور `123456`. غيّر كلمة المرور فور تسجيل الدخول من «بيانات الحساب». لن تعيد عملية التهيئة تعيين كلمة المرور أو استبدال حساب مدير موجود.
 
 ### متغيرات البيئة
 
@@ -83,8 +85,8 @@ NODE_ENV=production node dist/index.js
 
 ## قاعدة البيانات
 
-- الهجرات: `drizzle/0000` → `drizzle/0005_lab_operations.sql`، وتُطبَّق عبر `pnpm db:migrate:app`.
-- البذور: `scripts/seed.ts` (11 فحصًا، إعدادات المستوصف، سعرا المعاينة).
+- الهجرات: ملفات `drizzle/*.sql` بترتيبها الرقمي حتى `0011_usernames.sql`، وتُطبَّق عبر `pnpm db:migrate:app`.
+- البذور: `scripts/seed.ts` (كتالوج الفحوصات، إعدادات المستوصف، سعرا المعاينة، وحساب المدير الافتراضي في قاعدة فارغة فقط).
 - الجداول الرئيسية: `patients`, `invoices`, `invoice_items`, `invoice_adjustments`, `lab_orders`, `lab_results`, `lab_tests`, `price_changes`, `shifts`, `user_shift_assignments`, `staff_members`, `clinic_settings`, `users`.
 - بيانات الدخول التجريبي تُنشأ تلقائيًا عند `ALLOW_PREVIEW_LOGIN=1` (مدير، مشرف، كاشير، فني مختبر) وتظهر كأزرار في شاشة الدخول.
 

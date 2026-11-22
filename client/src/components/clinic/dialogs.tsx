@@ -300,7 +300,7 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
   const [error, setError] = useState("");
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [password, setPassword] = useState("");
-  const [selectedAccount, setSelectedAccount] = useState<{ id: number; name: string | null; role: Role } | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<{ username: string; name: string | null; role: Role } | null>(null);
   const roles: Role[] = ["admin", "supervisor", "cashier", "lab"];
 
   const officialLogin = () => {
@@ -328,7 +328,7 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
     event.preventDefault();
     if (!selectedAccount) return;
     setError("");
-    namedLoginMutation.mutate({ userId: selectedAccount.id, password }, {
+    namedLoginMutation.mutate({ username: selectedAccount.username, password }, {
       onSuccess: () => { onToast(`مرحبًا ${selectedAccount.name ?? ""}`); window.setTimeout(() => window.location.reload(), 250); },
       onError: mutationError => setError(mutationError.message || "تعذر تسجيل الدخول"),
     });
@@ -342,17 +342,17 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
           <button className="icon-button" onClick={onClose} aria-label="إغلاق"><X size={18} /></button>
           <div className="login-symbol"><ShieldCheck size={29} /></div>
           <span className="eyebrow">دخول آمن للمستوصف</span>
-          <h2>اختر اسمك للدخول</h2>
-          <p>اختر اسم الموظف؛ ستُطلب كلمة المرور ثم تُفتح الواجهة المحددة لصلاحيات حسابه.</p>
+          <h2>اختر اسم المستخدم للدخول</h2>
+          <p>اختر اسم المستخدم من القائمة، ثم أدخل كلمة مروره لفتح القسم والصلاحيات المرتبطة بحسابه.</p>
         </div>
         <div className="modal-body login-body">
           {namedAccountsQuery.data && namedAccountsQuery.data.length > 0 && <>
             {(["admin", "supervisor", "cashier", "lab"] as const).map(role => {
               const accounts = namedAccountsQuery.data.filter(account => account.role === role);
               if (!accounts.length) return null;
-              return <div key={role} className="login-account-group"><span className="eyebrow">{roleLabels[role]}</span><div className="demo-role-grid">{accounts.map(account => <button type="button" key={account.id} aria-pressed={selectedAccount?.id === account.id} className={selectedAccount?.id === account.id ? "selected" : ""} onClick={() => { setSelectedAccount({ ...account, role: account.role as Role }); setPassword(""); setError(""); }}><span className="demo-role-icon"><ShieldCheck size={16} /></span><span><strong>{account.name || "موظف"}</strong><small>{roleLabels[account.role as Role]}</small></span></button>)}</div></div>;
+              return <div key={role} className="login-account-group"><span className="eyebrow">{roleLabels[role]}</span><div className="demo-role-grid">{accounts.map(account => <button type="button" key={account.id} aria-pressed={selectedAccount?.username === account.username} className={selectedAccount?.username === account.username ? "selected" : ""} onClick={() => { setSelectedAccount({ username: account.username ?? "", name: account.name, role: account.role as Role }); setPassword(""); setError(""); }}><span className="demo-role-icon"><ShieldCheck size={16} /></span><span><strong dir="ltr">{account.username ?? "اسم غير معيّن"}</strong><small>{account.name || "موظف"}</small></span></button>)}</div></div>;
             })}
-            {selectedAccount && <form className="preview-login-form" onSubmit={namedLogin}><label className="form-field full-field"><span>كلمة مرور {selectedAccount.name}</span><input autoComplete="current-password" autoFocus type="password" maxLength={128} required value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور" /></label><button className="button button-primary full-width" type="submit" disabled={namedLoginMutation.isPending || !password}>{namedLoginMutation.isPending ? "جارٍ التحقق..." : `دخول ${roleLabels[selectedAccount.role]}`}</button></form>}
+            {selectedAccount && <form className="preview-login-form" onSubmit={namedLogin}><label className="form-field full-field"><span>اسم المستخدم</span><input dir="ltr" autoComplete="username" readOnly value={selectedAccount.username} /></label><label className="form-field full-field"><span>كلمة المرور</span><input autoComplete="current-password" autoFocus type="password" maxLength={128} required value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور" /></label><button className="button button-primary full-width" type="submit" disabled={namedLoginMutation.isPending || !password}>{namedLoginMutation.isPending ? "جارٍ التحقق..." : `دخول ${roleLabels[selectedAccount.role]}`}</button></form>}
             <div className="login-divider"><span>أو</span></div>
           </>}
           <button className="button button-primary full-width login-main-action" onClick={officialLogin}><LogIn size={17} />الدخول الموحد عبر Manus</button>
