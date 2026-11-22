@@ -11,7 +11,7 @@ import {
   resolveConsultationPrices,
   type ConsultationType,
 } from "@shared/billing";
-import { and, desc, eq, gte, inArray, like, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -19,6 +19,8 @@ import {
   invoiceAdjustments,
   invoiceItems,
   invoices,
+  cashierAttention,
+  labResultDrafts,
   labOrders,
   labResults,
   labTests,
@@ -27,6 +29,7 @@ import {
   priceChanges,
   shifts,
   staffMembers,
+  staffMessages,
   userShiftAssignments,
   users,
 } from "../drizzle/schema";
@@ -791,6 +794,28 @@ export const appRouter = router({
   }),
 
   laboratory: router({
+    listDrafts: roleProcedure("lab").input(z.object({ labOrderIds: z.array(z.number().int().positive()).max(50) })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      if (!input.labOrderIds.length) return [];
+      return db.select({ labOrderId: labResultDrafts.labOrderId, valuesJson: labResultDrafts.valuesJson })
+        .from(labResultDrafts).innerJoin(labOrders, eq(labOrders.id, labResultDrafts.labOrderId))
+        .innerJoin(invoices, eq(invoices.id, labOrders.invoiceId))
+        .where(and(inArray(labResultDrafts.labOrderId, input.labOrderIds), eq(invoices.status, "paid"))).limit(50);
+    }),
+    saveDraft: roleProcedure("lab").input(resultInput).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [order] = await db.select({ id: labOrders.id, status: labOrders.status, invoiceStatus: invoices.status })
+        .from(labOrders).innerJoin(invoices, eq(invoices.id, labOrders.invoiceId))
+        .where(eq(labOrders.id, input.labOrderId)).limit(1);
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "طلب المختبر غير موجود" });
+      if (order.invoiceStatus !== "paid" || order.status === "blocked") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن حفظ مسودة قبل اكتمال الدفع" });
+      if (order.status === "completed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "النتيجة معتمدة بالفعل" });
+      await db.insert(labResultDrafts).values({ labOrderId: input.labOrderId, technicianUserId: ctx.user.id, valuesJson: JSON.stringify(input.values) })
+        .onDuplicateKeyUpdate({ set: { technicianUserId: ctx.user.id, valuesJson: JSON.stringify(input.values) } });
+      return { success: true } as const;
+    }),
     pending: roleProcedure("lab").query(async () => {
       const db = await getDb();
       if (!db) return [];
@@ -821,6 +846,7 @@ export const appRouter = router({
       } else {
         await db.insert(labResults).values({ labOrderId: input.labOrderId, valuesJson, remarks: input.remarks, technicianUserId: ctx.user.id });
       }
+      await db.delete(labResultDrafts).where(eq(labResultDrafts.labOrderId, input.labOrderId));
       await db.update(labOrders).set({ status: "completed", resultIssuedAt: new Date(), collectedAt: order.collectedAt ?? new Date() }).where(eq(labOrders.id, input.labOrderId));
       return { success: true } as const;
     }),
@@ -838,10 +864,51 @@ export const appRouter = router({
           const fields = { valuesJson: JSON.stringify(result.values), remarks: result.remarks, technicianUserId: ctx.user.id };
           if (existing) await tx.update(labResults).set(fields).where(eq(labResults.id, existing.id));
           else await tx.insert(labResults).values({ labOrderId: result.labOrderId, ...fields });
+          await tx.delete(labResultDrafts).where(eq(labResultDrafts.labOrderId, result.labOrderId));
           await tx.update(labOrders).set({ status: "completed", resultIssuedAt: new Date(), collectedAt: order.collectedAt ?? new Date() }).where(eq(labOrders.id, result.labOrderId));
         }
       });
       return { success: true, savedCount: input.results.length } as const;
+    }),
+  }),
+
+  teamCommunication: router({
+    messages: roleProcedure("cashier", "lab").query(async () => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const rows = await db.select({ id: staffMessages.id, body: staffMessages.body, createdAt: staffMessages.createdAt, senderUserId: users.id, senderName: users.name, senderRole: users.role })
+        .from(staffMessages).innerJoin(users, eq(users.id, staffMessages.senderUserId)).orderBy(desc(staffMessages.createdAt)).limit(100);
+      return rows.reverse();
+    }),
+    sendMessage: roleProcedure("cashier", "lab").input(z.object({ body: z.string().trim().min(1).max(1000) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      await db.insert(staffMessages).values({ senderUserId: ctx.user.id, body: input.body });
+      return { success: true } as const;
+    }),
+    cashierAlerts: roleProcedure("cashier").query(async () => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      return db.select({ id: cashierAttention.id, invoiceId: invoices.id, invoiceNumber: invoices.invoiceNumber, patientNumber: patients.patientNumber, patientName: patients.name, note: cashierAttention.note, flaggedAt: cashierAttention.flaggedAt, flaggedByName: users.name })
+        .from(cashierAttention).innerJoin(invoices, eq(invoices.id, cashierAttention.invoiceId))
+        .innerJoin(patients, eq(patients.id, invoices.patientId)).leftJoin(users, eq(users.id, cashierAttention.flaggedBy))
+        .where(and(eq(invoices.status, "pending"), isNull(cashierAttention.resolvedAt))).orderBy(desc(cashierAttention.flaggedAt)).limit(100);
+    }),
+    flagCashier: roleProcedure("lab").input(z.object({ invoiceId: z.number().int().positive(), note: z.string().trim().max(500).optional() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const [invoice] = await db.select({ id: invoices.id, status: invoices.status }).from(invoices).where(eq(invoices.id, input.invoiceId)).limit(1);
+      if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+      if (invoice.status !== "pending") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "التنبيه متاح للفواتير التي تنتظر الدفع فقط" });
+      await db.insert(cashierAttention).values({ invoiceId: input.invoiceId, flaggedBy: ctx.user.id, note: input.note || null })
+        .onDuplicateKeyUpdate({ set: { flaggedBy: ctx.user.id, flaggedAt: new Date(), note: input.note || null, resolvedBy: null, resolvedAt: null } });
+      return { success: true } as const;
+    }),
+    resolveCashierAlert: roleProcedure("cashier").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      await db.update(cashierAttention).set({ resolvedBy: ctx.user.id, resolvedAt: new Date() }).where(and(eq(cashierAttention.id, input.id), isNull(cashierAttention.resolvedAt)));
+      return { success: true } as const;
     }),
   }),
 

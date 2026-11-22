@@ -146,7 +146,7 @@ export function Lab({ patients, catalog, prices, selectedPatientId, setSelectedP
             {testList.map(test => {
               const state = selectedPatient.orderStates?.[test.code];
               return (
-                <button key={test.code} className={test.code === selectedTest.code ? "active" : ""} onClick={() => { setSelectedTestCode(test.code); setResultDraft(results[`${selectedPatient.id}-${test.code}`] ?? {}); }}>
+                <button key={test.code} className={test.code === selectedTest.code ? "active" : ""} onClick={() => setSelectedTestCode(test.code)}>
                   <span>{test.code}</span>
                   {state === "completed" ? <BadgeCheck size={14} /> : <span className={`tab-dot ${state ?? ""}`} />}
                 </button>

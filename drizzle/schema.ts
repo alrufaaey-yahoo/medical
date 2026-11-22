@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -145,6 +145,31 @@ export const labResults = mysqlTable("lab_results", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+export const labResultDrafts = mysqlTable("lab_result_drafts", {
+  id: int("id").autoincrement().primaryKey(),
+  labOrderId: int("labOrderId").notNull(),
+  technicianUserId: int("technicianUserId").notNull(),
+  valuesJson: text("valuesJson").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("lab_result_drafts_order_unique").on(table.labOrderId)]);
+
+export const cashierAttention = mysqlTable("cashier_attention", {
+  id: int("id").autoincrement().primaryKey(),
+  invoiceId: int("invoiceId").notNull(),
+  flaggedBy: int("flaggedBy").notNull(),
+  flaggedAt: timestamp("flaggedAt").defaultNow().notNull(),
+  note: varchar("note", { length: 500 }),
+  resolvedBy: int("resolvedBy"),
+  resolvedAt: timestamp("resolvedAt"),
+}, (table) => [uniqueIndex("cashier_attention_invoice_unique").on(table.invoiceId), index("cashier_attention_open_idx").on(table.resolvedAt, table.flaggedAt)]);
+
+export const staffMessages = mysqlTable("staff_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  senderUserId: int("senderUserId").notNull(),
+  body: varchar("body", { length: 1000 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("staff_messages_created_idx").on(table.createdAt)]);
 
 /**
  * Staff roster managed by the operations supervisor: lab technicians and

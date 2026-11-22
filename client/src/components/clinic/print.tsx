@@ -15,6 +15,27 @@ export type PrintClinicInfo = {
 
 const PERIOD_LABEL: Record<ReportRange, string> = { today: "اليوم", week: "هذا الأسبوع", month: "هذا الشهر" };
 
+function groupTestsForPrint(tests: LabTest[]) {
+  const ordered = [...tests].sort((a, b) => Number(b.code.toUpperCase() === "CBC") - Number(a.code.toUpperCase() === "CBC"));
+  const pages: LabTest[][] = [];
+  let page: LabTest[] = [];
+  let used = 34; // Patient identity block, reserved only on the first page.
+  const pageLimit = 248;
+  for (const test of ordered) {
+    // Conservative millimetre estimate: section heading, result rows, notes/signature.
+    const estimate = 18 + test.fields.length * 6 + 28;
+    if (page.length && used + estimate > pageLimit) {
+      pages.push(page);
+      page = [];
+      used = 0;
+    }
+    page.push(test);
+    used += estimate;
+  }
+  if (page.length) pages.push(page);
+  return pages;
+}
+
 export function PrintDocument({ mode, patient, selectedTest, result, results, reportPatients, reportRange, clinic, catalog, prices, onClose }: {
   mode: Exclude<PrintMode, null>;
   patient: Patient;
@@ -99,19 +120,25 @@ export function PrintDocument({ mode, patient, selectedTest, result, results, re
 
   if (mode === "result") {
     const testsForPatient = patient.tests.map(code => catalog.find(test => test.code === code)).filter((test): test is LabTest => Boolean(test));
-    if (testsForPatient.length > 1) return <div className="print-doc a4-doc multi-result-print">
-      {testsForPatient.map((test, index) => {
-        const values = results[`${patient.id}-${test.code}`] ?? {};
-        return <section className="multi-result-page" key={test.code}>
-          <div className="a4-header"><div className="print-brand"><img src={clinic.logoUrl} alt="" /><div><strong>{clinic.name}</strong><span>قسم المختبر · نتائج الفحوصات المخبرية</span></div></div><div className="report-meta"><strong>{test.code}</strong><span>رقم العينة: {formatSampleNumber(patient, test)}</span></div></div>
+    if (testsForPatient.length > 1) {
+      const pages = groupTestsForPrint(testsForPatient);
+      return <div className="print-doc a4-doc multi-result-print">
+        {pages.map((page, pageIndex) => <section className="multi-result-page" key={page.map(test => test.code).join("-")}>
+          <div className="a4-header"><div className="print-brand"><img src={clinic.logoUrl} alt="" /><div><strong>{clinic.name}</strong><span>قسم المختبر · نتائج الفحوصات المخبرية</span></div></div><div className="report-meta"><strong>{page.map(test => test.code).join(" · ")}</strong><span>صفحة {pageIndex + 1} من {pages.length}</span></div></div>
           <div className="print-rule" />
-          {index === 0 && <div className="patient-print-grid"><div><span>اسم المريض</span><strong>{patient.name}</strong></div><div><span>رقم الملف</span><strong>{patient.id}</strong></div><div><span>العمر / الجنس</span><strong>{patient.age == null ? "غير محدد" : `${patient.age} سنة`} · {patient.gender}</strong></div><div><span>التاريخ</span><strong>{formatClinicDateFromKey(patient.registeredDate ?? getClinicDateKey())}</strong></div><div><span>نوع العينة</span><strong>{test.sample}</strong></div><div><span>الطبيب المحوّل</span><strong>{consultationChip(patient) ?? "بدون معاينة"}</strong></div></div>}
-          <div className="result-print-title"><span>{test.category} · {index + 1} من {testsForPatient.length}</span><h1>{test.name}</h1><p>{test.english}</p></div>
-          <table className="result-print-table"><thead><tr><th>الفحص</th><th>النتيجة</th><th>الوحدة</th><th>المدى المرجعي ({patient.gender})</th></tr></thead><tbody>{test.fields.map(field => <tr key={field.key}><td>{field.label}</td><td><strong>{values[field.key] || "—"}</strong></td><td>{field.unit || "—"}</td><td>{patient.gender === "ذكر" ? field.male : field.female}</td></tr>)}</tbody></table>
-          <div className="remarks-print"><strong>ملاحظات / Remarks</strong><p>{values.remarks || "لا توجد ملاحظات إضافية."}</p></div><div className="signature-row"><div><span>اسم فني المختبر</span><strong>{values.technician || "________________"}</strong></div><div><span>التوقيع والختم</span><strong>________________</strong></div></div>
+          {pageIndex === 0 && <div className="patient-print-grid"><div><span>اسم المريض</span><strong>{patient.name}</strong></div><div><span>رقم الملف</span><strong>{patient.id}</strong></div><div><span>العمر / الجنس</span><strong>{patient.age == null ? "غير محدد" : `${patient.age} سنة`} · {patient.gender}</strong></div><div><span>التاريخ</span><strong>{formatClinicDateFromKey(patient.registeredDate ?? getClinicDateKey())}</strong></div><div><span>نوع العينة</span><strong>{page[0]?.sample}</strong></div><div><span>الطبيب المحوّل</span><strong>{consultationChip(patient) ?? "بدون معاينة"}</strong></div></div>}
+          {page.map(test => {
+            const values = results[`${patient.id}-${test.code}`] ?? {};
+            return <div className="print-test-block" key={test.code}>
+              <div className="result-print-title"><span>{test.code} · {test.category}</span><h2>{test.name}</h2><p>{test.english} · العينة: {test.sample}</p></div>
+              <table className="result-print-table"><thead><tr><th>الفحص</th><th>النتيجة</th><th>الوحدة</th><th>المدى المرجعي ({patient.gender})</th></tr></thead><tbody>{test.fields.map(field => <tr key={field.key}><td>{field.label}</td><td><strong>{values[field.key] || "—"}</strong></td><td>{field.unit || "—"}</td><td>{patient.gender === "ذكر" ? field.male : field.female}</td></tr>)}</tbody></table>
+              {values.remarks && <div className="remarks-print"><strong>ملاحظات / Remarks</strong><p>{values.remarks}</p></div>}
+            </div>;
+          })}
+          <div className="signature-row"><div><span>اسم فني المختبر</span><strong>{page.map(test => results[`${patient.id}-${test.code}`]?.technician).find(Boolean) || "________________"}</strong></div><div><span>التوقيع والختم</span><strong>________________</strong></div></div>
           <div className="a4-footer"><span>هذه النتيجة للاستخدام الطبي المعتمد فقط، وتُفسّر مع الحالة السريرية.</span><span>{clinic.footerText} · {clinic.name}</span></div>
-        </section>;
-      })}{closeButton}</div>;
+        </section>)}{closeButton}</div>;
+    }
     return (
       <div className="print-doc a4-doc">
         <div className="a4-header">
