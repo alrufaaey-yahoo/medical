@@ -112,7 +112,7 @@ export function Lab({ patients, catalog, prices, cbcEnabled, cbcConnection, sele
       setResultDraft(applied.values);
       const detail = applied.unmapped.length ? `؛ رموز غير موجودة في النموذج: ${applied.unmapped.join(", ")}` : "";
       const ambiguous = applied.ambiguous.length ? `؛ رموز متكررة لم تُملأ تلقائيًا: ${applied.ambiguous.join(", ")}` : "";
-      setCbcImportFeedback({ text: `نجح الاستيراد كمسودة من العينة ${payload.sample.sampleId}: تم ملء ${applied.filled.length} حقلًا فارغًا. لم يُحفظ التقرير ولم يُعتمد.${detail}${ambiguous}`, error: false });
+      setCbcImportFeedback({ text: `جُلبت العينة ${payload.sample.sampleId}: مُلئت ${applied.filled.length} خانة فارغة، وبقيت الخانات التي أدخلها المستخدم كما هي. هذه مسودة فقط؛ اضغط «حفظ النتيجة» للحفظ اليدوي.${detail}${ambiguous}`, error: false });
     } catch (error) {
       setCbcImportFeedback({ text: error instanceof Error ? error.message : "حدث خطأ أثناء استيراد نتيجة CBC.", error: true });
     } finally {
@@ -195,7 +195,7 @@ export function Lab({ patients, catalog, prices, cbcEnabled, cbcConnection, sele
             <div className="cbc-import-bar">
               {selectedTest.code === "CBC" && cbcEnabled && <>
                 <span className={`cbc-import-status ${cbcConnection === "disconnected" ? "disconnected" : "connected"}`}><span className={cbcConnection === "receiving" ? "live-dot" : ""} />{cbcConnection === "receiving" ? "يستقبل بيانات" : cbcConnection === "connected" ? "متصل" : "غير متصل"}</span>
-                <button type="button" className="button button-soft" disabled={cbcImporting || !canEnterResult} onClick={() => void importLatestCbc()}><Download size={15} />{cbcImporting ? "جارٍ الاستيراد..." : "استيراد آخر نتيجة CBC"}</button>
+                <button type="button" className="button button-soft" disabled={cbcImporting || !canEnterResult} onClick={() => void importLatestCbc()}><Download size={15} />{cbcImporting ? "جارٍ جلب العينة..." : "جلب أحدث عينة للحقول الفارغة"}</button>
               </>}
               <span className="reference-note">المدى المرجعي يتبع {selectedPatient.gender}</span>
             </div>

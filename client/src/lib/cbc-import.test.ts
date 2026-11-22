@@ -54,4 +54,28 @@ describe("CBC analyzer import", () => {
     const ambiguous = applyCbcAnalyzerSample(sample.patientNumber, duplicate, {}, fields);
     expect(ambiguous.ok && ambiguous.ambiguous).toContain("wbc");
   });
+
+  it("maps analyzer display parameters while preserving composite unknowns", () => {
+    const analyzerSample = {
+      ...sample,
+      results: [
+        { code: "LYM%", value: "19.1", unit: "%", referenceRange: "", abnormalFlag: "L" },
+        { code: "LYM#", value: "0.4", unit: "10^3/uL", referenceRange: "", abnormalFlag: "L" },
+        { code: "RDW_CV", value: "13.8", unit: "%", referenceRange: "", abnormalFlag: "" },
+        { code: "RDW_SD", value: "53.9", unit: "fL", referenceRange: "", abnormalFlag: "" },
+        { code: "PCT", value: "0.14", unit: "%", referenceRange: "", abnormalFlag: "" },
+        { code: "MID%", value: "5.7", unit: "%", referenceRange: "", abnormalFlag: "" },
+        { code: "GRAN%", value: "75.2", unit: "%", referenceRange: "", abnormalFlag: "H" },
+      ],
+    };
+    const result = applyCbcAnalyzerSample(sample.patientNumber, analyzerSample, {}, fields);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.values.lym).toBe("19.1");
+    expect(result.values.lym_abs).toBe("0.4");
+    expect(result.values.rdw).toBe("13.8");
+    expect(result.values.rdw_sd).toBe("53.9");
+    expect(result.values.pct).toBe("0.14");
+    expect(result.unmapped).toEqual(expect.arrayContaining(["MID%", "GRAN%"]));
+  });
 });
