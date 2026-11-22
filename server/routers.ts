@@ -31,6 +31,7 @@ import {
   paymentBanks,
   priceChanges,
   shifts,
+  shiftHandoffs,
   staffMembers,
   staffMessages,
   previewLoginAccounts,
@@ -768,6 +769,68 @@ export const appRouter = router({
         return { shiftId: shift.id, userIds: uniqueIds };
       });
     }),
+    handoffs: adminProcedure.input(z.object({ shiftDate: clinicDate })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      const rows = await db.select({ handoff: shiftHandoffs, shift: shifts })
+        .from(shiftHandoffs).innerJoin(shifts, eq(shiftHandoffs.shiftId, shifts.id))
+        .where(eq(shifts.shiftDate, input.shiftDate)).orderBy(desc(shiftHandoffs.createdAt));
+      const userIds = [...new Set(rows.flatMap(({ handoff }) => [handoff.originalUserId, handoff.substituteUserId, handoff.approvedBy]))];
+      const staff = userIds.length ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, userIds)) : [];
+      const names = new Map(staff.map(user => [user.id, user.name]));
+      return rows.map(({ handoff, shift }) => ({
+        ...handoff,
+        shiftDate: shift.shiftDate,
+        shiftType: shift.shiftType,
+        originalUserName: names.get(handoff.originalUserId) ?? null,
+        substituteUserName: names.get(handoff.substituteUserId) ?? null,
+        approvedByName: names.get(handoff.approvedBy) ?? null,
+      }));
+    }),
+    recordHandoff: adminProcedure.input(z.object({
+      shiftDate: clinicDate,
+      shiftType: shiftTypeInput,
+      staffRole: z.enum(["cashier", "lab"]),
+      originalUserId: z.number().int().positive(),
+      substituteUserId: z.number().int().positive(),
+      reason: z.string().trim().min(3).max(500),
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "قاعدة البيانات غير متصلة" });
+      if (input.originalUserId === input.substituteUserId) throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن أن يكون البديل هو الموظف الأصلي" });
+      return db.transaction(async tx => {
+        const [shift] = await tx.select().from(shifts)
+          .where(and(eq(shifts.shiftDate, input.shiftDate), eq(shifts.shiftType, input.shiftType))).limit(1).for("update");
+        if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "الوردية غير موجودة" });
+        if (shift.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تسليم وردية مغلقة" });
+        const assignedOriginal = input.staffRole === "cashier" ? shift.cashierUserId : shift.labUserId;
+        if (assignedOriginal !== input.originalUserId) throw new TRPCError({ code: "BAD_REQUEST", message: "الموظف الأصلي لا يطابق تعيين الوردية" });
+        const selected = await tx.select({ id: users.id, role: users.role }).from(users)
+          .where(inArray(users.id, [input.originalUserId, input.substituteUserId]));
+        const substitute = selected.find(user => user.id === input.substituteUserId);
+        if (selected.length !== 2 || !substitute) throw new TRPCError({ code: "NOT_FOUND", message: "أحد الموظفين غير موجود" });
+        if (substitute.role !== input.staffRole) throw new TRPCError({ code: "BAD_REQUEST", message: "دور الموظف البديل لا يطابق دور التسليم" });
+        await tx.insert(shiftHandoffs).values({
+          shiftId: shift.id,
+          staffRole: input.staffRole,
+          originalUserId: input.originalUserId,
+          substituteUserId: input.substituteUserId,
+          reason: input.reason,
+          approvedBy: ctx.user.id,
+        }).onDuplicateKeyUpdate({ set: {
+          originalUserId: input.originalUserId,
+          substituteUserId: input.substituteUserId,
+          reason: input.reason,
+          approvedBy: ctx.user.id,
+          approvedAt: new Date(),
+        } });
+        await tx.insert(userShiftAssignments).values({ shiftId: shift.id, userId: input.substituteUserId, assignedBy: ctx.user.id })
+          .onDuplicateKeyUpdate({ set: { assignedBy: ctx.user.id } });
+        const [handoff] = await tx.select().from(shiftHandoffs)
+          .where(and(eq(shiftHandoffs.shiftId, shift.id), eq(shiftHandoffs.staffRole, input.staffRole))).limit(1);
+        return handoff;
+      });
+    }),
     myAssignments: protectedProcedure.input(z.object({ shiftDate: clinicDate })).query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return [];
@@ -1093,7 +1156,9 @@ export const appRouter = router({
       if (ctx.user.role === "cashier") {
         const [assigned] = await db.select({ id: userShiftAssignments.id }).from(userShiftAssignments)
           .where(and(eq(userShiftAssignments.shiftId, shift.id), eq(userShiftAssignments.userId, ctx.user.id))).limit(1);
-        if (!assigned && shift.cashierUserId !== ctx.user.id) {
+        const [handoff] = await db.select({ id: shiftHandoffs.id }).from(shiftHandoffs)
+          .where(and(eq(shiftHandoffs.shiftId, shift.id), eq(shiftHandoffs.staffRole, "cashier"), eq(shiftHandoffs.substituteUserId, ctx.user.id))).limit(1);
+        if (!assigned && !handoff && shift.cashierUserId !== ctx.user.id) {
           throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك مشاهدة تقرير وردية غير مسندة إليك" });
         }
       }

@@ -97,6 +97,22 @@ export const userShiftAssignments = mysqlTable("user_shift_assignments", {
   assignedAt: timestamp("assignedAt").defaultNow().notNull(),
 }, (table) => [uniqueIndex("user_shift_assignments_unique").on(table.shiftId, table.userId)]);
 
+/** Approved coverage keeps the original shift owner while authorizing a substitute. */
+export const shiftHandoffs = mysqlTable("shift_handoffs", {
+  id: int("id").autoincrement().primaryKey(),
+  shiftId: int("shiftId").notNull(),
+  staffRole: mysqlEnum("staffRole", ["cashier", "lab"]).notNull(),
+  originalUserId: int("originalUserId").notNull(),
+  substituteUserId: int("substituteUserId").notNull(),
+  reason: varchar("reason", { length: 500 }).notNull(),
+  approvedBy: int("approvedBy").notNull(),
+  approvedAt: timestamp("approvedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("shift_handoffs_shift_role_unique").on(table.shiftId, table.staffRole),
+  index("shift_handoffs_shift_idx").on(table.shiftId),
+]);
+
 export const patients = mysqlTable("patients", {
   id: int("id").autoincrement().primaryKey(),
   patientNumber: varchar("patientNumber", { length: 32 }).notNull().unique(),

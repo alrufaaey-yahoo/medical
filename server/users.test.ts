@@ -63,6 +63,41 @@ describe("user administration API permissions", () => {
     });
   });
 
+  it("keeps shift handoff history admin-only", async () => {
+    const caller = createCaller({ id: 2, role: "supervisor" } as TestUser);
+
+    await expect(caller.shifts.handoffs({ shiftDate: "2026-11-21" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.shifts.recordHandoff({
+      shiftDate: "2026-11-21",
+      shiftType: "morning",
+      staffRole: "cashier",
+      originalUserId: 8,
+      substituteUserId: 9,
+      reason: "تغطية مؤقتة",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("validates shift handoff ids and reason before database access", async () => {
+    const caller = createCaller({ id: 7, role: "admin" } as TestUser);
+
+    await expect(caller.shifts.recordHandoff({
+      shiftDate: "2026-11-21",
+      shiftType: "morning",
+      staffRole: "cashier",
+      originalUserId: 0,
+      substituteUserId: 9,
+      reason: "تغطية مؤقتة",
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.shifts.recordHandoff({
+      shiftDate: "2026-11-21",
+      shiftType: "morning",
+      staffRole: "cashier",
+      originalUserId: 8,
+      substituteUserId: 9,
+      reason: "لا",
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("validates positive staff ids for shift assignments", async () => {
     const caller = createCaller({ id: 7, role: "admin" } as TestUser);
 
