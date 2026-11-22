@@ -292,7 +292,7 @@ export function InvoiceEditor({ invoiceId, catalog, prices, onClose, onSaved, on
   );
 }
 
-export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
+export function LoginDialog({ onClose, onToast, onAuthenticated }: { onClose: () => void; onToast: (message: string) => void; onAuthenticated: () => Promise<void> | void }) {
   const namedAccountsQuery = trpc.auth.namedAccounts.useQuery(undefined, { retry: false });
   const namedLoginMutation = trpc.auth.namedLogin.useMutation();
   const previewQuery = trpc.auth.previewAvailable.useQuery(undefined, { retry: false });
@@ -316,9 +316,9 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
     if (!selectedRole) return;
     setError("");
     previewMutation.mutate({ role: selectedRole, password }, {
-      onSuccess: () => {
+      onSuccess: async () => {
         onToast(`تم الدخول بصلاحية ${roleLabels[selectedRole]}`);
-        window.setTimeout(() => window.location.reload(), 300);
+        await onAuthenticated();
       },
       onError: mutationError => setError(mutationError.message || "تعذر تفعيل دخول المعاينة"),
     });
@@ -329,7 +329,7 @@ export function LoginDialog({ onClose, onToast }: { onClose: () => void; onToast
     if (!selectedAccount) return;
     setError("");
     namedLoginMutation.mutate({ username: selectedAccount.username, password }, {
-      onSuccess: () => { onToast(`مرحبًا ${selectedAccount.name ?? ""}`); window.setTimeout(() => window.location.reload(), 250); },
+      onSuccess: async () => { onToast(`مرحبًا ${selectedAccount.name ?? ""}`); await onAuthenticated(); },
       onError: mutationError => setError(mutationError.message || "تعذر تسجيل الدخول"),
     });
   };

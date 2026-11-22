@@ -17,6 +17,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONSULTATION_PRICES, type ConsultationType } from "@shared/billing";
@@ -36,6 +37,7 @@ import { EMPTY_PATIENT, roleLabels, roleSections, sectionLabels, serverShiftByLa
 import type { ClinicSettingsDraft } from "@/components/clinic/Settings";
 import { TeamCommunication } from "@/components/clinic/TeamCommunication";
 import { NotificationCenter } from "@/components/clinic/NotificationCenter";
+import { AccountMenu } from "@/components/clinic/AccountMenu";
 import { AppLogo, SectionTitle } from "@/components/clinic/ui";
 
 const Billing = lazy(() => import("@/components/clinic/Billing").then(module => ({ default: module.Billing })));
@@ -110,6 +112,29 @@ export default function Home() {
   const [printReportRange, setPrintReportRange] = useState<ReportRange>("today");
 
   const authQuery = trpc.auth.me.useQuery(undefined, { retry: false });
+  const queryClient = useQueryClient();
+  const resetSessionView = async () => {
+    setActiveSection("overview");
+    setShift(getCurrentClinicShift());
+    setSearch("");
+    setMobileMenu(false);
+    setTeamChatOpen(false);
+    setShowPatientDialog(false);
+    setExistingInvoiceFor(undefined);
+    setEditorInvoiceId(null);
+    setShowLoginPanel(false);
+    setShowAccountSettings(false);
+    setShowLogoutReminder(false);
+    setDrawerPatient(null);
+    setSelectedPatientId("");
+    setSelectedTestCode("");
+    setResultDrafts({});
+    dirtyDraftKeys.current.clear();
+    draftRevisions.current.clear();
+    setPrintMode(null);
+    setPrintPatientSnapshot(null);
+    await queryClient.resetQueries();
+  };
   const sessionRole = authQuery.data?.role;
   const operationalRole = isOperationalRole(sessionRole) ? sessionRole : null;
   const effectiveRole: Role = operationalRole ?? "supervisor";
@@ -131,7 +156,7 @@ export default function Home() {
   const currentShiftInput = useMemo(() => ({ shiftDate: getClinicShiftDateKey(), shiftType: serverShiftByLabel[shift] }), [shift]);
   const currentShiftQuery = trpc.shifts.current.useQuery(currentShiftInput, { enabled: Boolean(operationalRole), retry: false });
   const trpcUtils = trpc.useUtils();
-  const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: () => { void trpcUtils.auth.me.invalidate(); window.location.reload(); } });
+  const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: resetSessionView });
 
   const registerMutation = trpc.patients.register.useMutation();
   const followUpMutation = trpc.patients.addTests.useMutation();
@@ -593,14 +618,14 @@ export default function Home() {
             : "سجّل الدخول لإدارة المرضى والفواتير والمختبر والتقارير بصلاحيات منفصلة لكل دور."}</p>
           <div className="welcome-actions">
             <button className="button button-primary" onClick={() => setShowLoginPanel(true)}><LogIn size={17} />تسجيل الدخول</button>
-            {authQuery.data && <button className="button button-secondary" onClick={() => { void trpcUtils.auth.me.invalidate(); window.location.reload(); }}><ArrowLeft size={16} />تحديث الجلسة</button>}
+            {authQuery.data && <button className="button button-secondary" onClick={() => { void authQuery.refetch(); }}><ArrowLeft size={16} />إعادة التحقق من الجلسة</button>}
           </div>
           <div className="welcome-roles">
             {(Object.keys(roleLabels) as Role[]).map(role => <div key={role}><ShieldCheck size={16} /><strong>{roleLabels[role]}</strong></div>)}
           </div>
         </div>
         <Suspense fallback={<div className="app-splash"><AppLogo /><span>جارٍ تحميل شاشة الدخول...</span></div>}>
-          {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
+          {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} onAuthenticated={resetSessionView} />}
         </Suspense>
         {toast && <div className="toast"><BadgeCheck size={17} /><span>{toast}</span><button onClick={() => setToast("")}><X size={14} /></button></div>}
       </div>
@@ -635,11 +660,6 @@ export default function Home() {
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-help"><div className="help-icon"><ShieldCheck size={17} /></div><div><strong>بياناتك محمية</strong><span>جلسة تشغيل موثقة</span></div></div>
-          <div className="user-mini">
-            <div className="avatar">{authQuery.data.name?.slice(0, 2) ?? "م"}</div>
-            <div><strong>{authQuery.data.name ?? "مستخدم"}</strong><span>{roleLabels[effectiveRole]}{authQuery.data.username ? ` · @${authQuery.data.username}` : ""}</span><button type="button" className="link-button" onClick={() => setShowAccountSettings(true)}>بيانات الحساب</button><button type="button" className="link-button" onClick={() => setShowLoginPanel(true)}>تغيير الحساب</button></div>
-            <button type="button" className="icon-button" onClick={() => setShowLogoutReminder(true)} aria-label="تسجيل الخروج" title="تسجيل الخروج"><LogOut size={17} /></button>
-          </div>
         </div>
       </aside>
 
@@ -656,6 +676,7 @@ export default function Home() {
             {effectiveRole === "lab" && <div className="shift-switcher"><span className="shift-dot" /><span className="lab-top-label">محطة المختبر</span></div>}
             <div className="date-chip"><CalendarDays size={15} />{formatClinicDate()}</div>
             <NotificationCenter role={effectiveRole} userId={authQuery.data.id} onOpenChat={() => setTeamChatOpen(true)} onNavigate={section => { setActiveSection(section); setMobileMenu(false); }} />
+            <AccountMenu name={authQuery.data.name} username={authQuery.data.username} roleLabel={roleLabels[effectiveRole]} onEditAccount={() => setShowAccountSettings(true)} onSwitchAccount={() => setShowLoginPanel(true)} onLogout={() => setShowLogoutReminder(true)} />
           </div>
         </header>
         <div className="content-wrap">
@@ -671,7 +692,7 @@ export default function Home() {
         {existingInvoiceFor !== undefined && <ExistingInvoiceDialog patients={patients} catalog={catalog} prices={prices} initialPatientNumber={existingInvoiceFor ?? undefined} onClose={() => setExistingInvoiceFor(undefined)} saving={followUpMutation.isPending} onSave={handleAddInvoice} />}
         {editorInvoiceId != null && <InvoiceEditor invoiceId={editorInvoiceId} catalog={catalog} prices={prices} onClose={() => setEditorInvoiceId(null)} onSaved={invalidateWorkspace} onToast={setToast} />}
         {showAccountSettings && <AccountSettingsDialog onClose={() => setShowAccountSettings(false)} onToast={setToast} />}
-        {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} />}
+        {showLoginPanel && <LoginDialog onClose={() => setShowLoginPanel(false)} onToast={setToast} onAuthenticated={resetSessionView} />}
         {drawerPatient && <PatientDrawer patient={drawerPatient} catalog={catalog} prices={prices} onClose={() => setDrawerPatient(null)} onPrintInvoice={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("invoice", snapshot); }} onPrintMedicalReport={() => { const snapshot = drawerPatient; setDrawerPatient(null); triggerPrint("patient-report", snapshot); }} onEditInvoice={() => { if (drawerPatient.databaseInvoiceId) { setEditorInvoiceId(drawerPatient.databaseInvoiceId); setDrawerPatient(null); } }} onAddInvoice={() => { const number = drawerPatient.id; setDrawerPatient(null); openExistingInvoice(number); }} onNavigate={section => { setActiveSection(section); }} />}
       </Suspense>
       {showLogoutReminder && <div className="modal-backdrop" onMouseDown={() => setShowLogoutReminder(false)}><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="logout-reminder-title" onMouseDown={event => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">تذكير قبل المغادرة</span><h2 id="logout-reminder-title">راجع الفواتير وتقرير الوردية</h2></div><button className="icon-button" onClick={() => setShowLogoutReminder(false)} aria-label="إغلاق"><X size={18} /></button></div><div className="modal-body"><p className="modal-paragraph">تأكد من حفظ الفواتير وتثبيت التحصيلات قبل تسجيل الخروج. يمكنك مراجعة تقرير الوردية باسمك الآن؛ لا تُغلق الوردية تلقائيًا عند الخروج.</p></div><div className="modal-footer"><button className="button button-secondary" onClick={() => { setShowLogoutReminder(false); setActiveSection("reports"); }}>مراجعة التقارير</button><button className="button button-primary" disabled={logoutMutation.isPending} onClick={() => logoutMutation.mutate()}><LogOut size={16} />{logoutMutation.isPending ? "جارٍ الخروج..." : "تأكيد تسجيل الخروج"}</button></div></div></div>}
