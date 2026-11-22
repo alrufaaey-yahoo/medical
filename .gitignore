@@ -118,3 +118,4 @@ cbc-bridge/*.env
 # Python bytecode
 __pycache__/
 *.py[cod]
+.vercel
