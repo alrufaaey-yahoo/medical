@@ -1,4 +1,4 @@
-import { AlertCircle, BadgeCheck, CalendarDays, KeyRound, Mail, Pencil, Phone, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, BadgeCheck, CalendarDays, KeyRound, Mail, Pencil, Phone, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatClinicTime, getClinicDateKey } from "@/lib/clinic-workflow";
@@ -275,8 +275,14 @@ export function AccountSettingsDialog({ onClose, onToast }: { onClose: () => voi
 function ShiftAssignments({ onToast }: { onToast: (message: string) => void }) {
   const date = getClinicDateKey();
   const assignmentsQuery = trpc.shifts.assignments.useQuery({ shiftDate: date }, { retry: false });
+  const handoffsQuery = trpc.shifts.handoffs.useQuery({ shiftDate: date }, { retry: false });
   const assignMutation = trpc.shifts.assignUsers.useMutation();
   const closeMutation = trpc.shifts.close.useMutation();
+  const handoffMutation = trpc.shifts.recordHandoff.useMutation();
+  const [handoffShiftType, setHandoffShiftType] = useState<ShiftTypeValue>("morning");
+  const [handoffRole, setHandoffRole] = useState<"cashier" | "lab">("cashier");
+  const [substituteUserId, setSubstituteUserId] = useState("");
+  const [handoffReason, setHandoffReason] = useState("");
   const [draft, setDraft] = useState<Record<ShiftTypeValue, { cashierUserId: string; labUserId: string }>>({
     morning: { cashierUserId: "", labUserId: "" },
     evening: { cashierUserId: "", labUserId: "" },
@@ -298,7 +304,7 @@ function ShiftAssignments({ onToast }: { onToast: (message: string) => void }) {
       cashierUserId: selected.cashierUserId ? Number(selected.cashierUserId) : null,
       labUserId: selected.labUserId ? Number(selected.labUserId) : null,
     }, {
-      onSuccess: () => { void assignmentsQuery.refetch(); onToast(`تم حفظ توزيع الوردية ${shiftTypes.find(item => item.value === shiftType)?.label}`); },
+      onSuccess: () => { void assignmentsQuery.refetch(); void handoffsQuery.refetch(); onToast(`تم حفظ توزيع الوردية ${shiftTypes.find(item => item.value === shiftType)?.label}`); },
       onError: error => onToast(error.message || "تعذر حفظ توزيع الوردية"),
     });
   };
@@ -306,7 +312,7 @@ function ShiftAssignments({ onToast }: { onToast: (message: string) => void }) {
   const closeShift = (shiftType: ShiftTypeValue) => {
     if (!window.confirm("قبل إغلاق الوردية: راجع الفواتير والتحصيلات واحفظ أي عمل معلّق، واستخرج تقرير الوردية من قسم التقارير. بعد الإغلاق لن يمكن تسجيل مرضى جدد فيها. هل تريد المتابعة؟")) return;
     closeMutation.mutate({ shiftDate: date, shiftType }, {
-      onSuccess: () => { void assignmentsQuery.refetch(); onToast(`تم إغلاق الوردية ${shiftTypes.find(item => item.value === shiftType)?.label}`); },
+      onSuccess: () => { void assignmentsQuery.refetch(); void handoffsQuery.refetch(); onToast(`تم إغلاق الوردية ${shiftTypes.find(item => item.value === shiftType)?.label}`); },
       onError: error => onToast(error.message || "تعذر إغلاق الوردية"),
     });
   };
@@ -314,6 +320,23 @@ function ShiftAssignments({ onToast }: { onToast: (message: string) => void }) {
   const staff = assignmentsQuery.data?.staff ?? [];
   const cashiers = staff.filter(user => user.role === "cashier");
   const labTechnicians = staff.filter(user => user.role === "lab");
+  const handoffShift = assignmentsQuery.data?.shifts.find(item => item.shiftType === handoffShiftType);
+  const originalUserId = handoffRole === "cashier" ? handoffShift?.cashierUserId : handoffShift?.labUserId;
+  const substitutes = handoffRole === "cashier" ? cashiers : labTechnicians;
+  const saveHandoff = () => {
+    if (!originalUserId || !substituteUserId || handoffReason.trim().length < 3) return;
+    handoffMutation.mutate({
+      shiftDate: date,
+      shiftType: handoffShiftType,
+      staffRole: handoffRole,
+      originalUserId,
+      substituteUserId: Number(substituteUserId),
+      reason: handoffReason.trim(),
+    }, {
+      onSuccess: () => { void handoffsQuery.refetch(); setSubstituteUserId(""); setHandoffReason(""); onToast("تم اعتماد تسليم الوردية وحفظ السجل"); },
+      onError: error => onToast(error.message || "تعذر اعتماد تسليم الوردية"),
+    });
+  };
 
   return (
     <section className="panel">
@@ -341,6 +364,22 @@ function ShiftAssignments({ onToast }: { onToast: (message: string) => void }) {
           </table>
         </div>
       )}
+      <div className="panel-header" style={{ marginTop: 24 }}><div><span className="eyebrow">تغطية معتمدة</span><h2>تسجيل تسليم الوردية</h2></div><ArrowLeftRight size={18} className="muted-icon" /></div>
+      <p className="settings-readonly-note" style={{ margin: "0 0 16px" }}>يُحفظ الموظف الأصلي كما هو، ويُمنح البديل صلاحية العمل والتقرير. لا يمكن تسجيل تسليم لوردية مغلقة.</p>
+      <div className="form-grid">
+        <label className="form-field"><span>الوردية</span><select value={handoffShiftType} onChange={event => { setHandoffShiftType(event.target.value as ShiftTypeValue); setSubstituteUserId(""); }}><option value="morning">صباحية</option><option value="evening">مسائية</option><option value="night">سهرة</option></select></label>
+        <label className="form-field"><span>الدور</span><select value={handoffRole} onChange={event => { setHandoffRole(event.target.value as typeof handoffRole); setSubstituteUserId(""); }}><option value="cashier">كاشير / استقبال</option><option value="lab">فني المختبر</option></select></label>
+        <label className="form-field"><span>الموظف الأصلي</span><input value={staff.find(user => user.id === originalUserId)?.name ?? (originalUserId ? `حساب ${originalUserId}` : "غير معيّن")} readOnly /></label>
+        <label className="form-field"><span>الموظف البديل *</span><select value={substituteUserId} onChange={event => setSubstituteUserId(event.target.value)}><option value="">اختر موظفًا</option>{substitutes.filter(user => user.id !== originalUserId).map(user => <option key={user.id} value={user.id}>{user.name ?? user.email ?? `حساب ${user.id}`}</option>)}</select></label>
+        <label className="form-field full-field"><span>سبب التغطية *</span><textarea value={handoffReason} onChange={event => setHandoffReason(event.target.value)} maxLength={500} rows={2} placeholder="مثال: إجازة مرضية للموظف الأصلي" /></label>
+        <div className="form-field" style={{ justifyContent: "end" }}><button className="button button-primary" disabled={handoffMutation.isPending || !originalUserId || !substituteUserId || handoffReason.trim().length < 3 || handoffShift?.status === "closed"} onClick={saveHandoff}><BadgeCheck size={16} />{handoffMutation.isPending ? "جارٍ الاعتماد..." : "اعتماد التسليم"}</button></div>
+      </div>
+      <div className="table-wrap" style={{ marginTop: 18 }}>
+        <table><thead><tr><th>الوردية</th><th>الدور</th><th>الأصلي</th><th>البديل</th><th>السبب</th><th>اعتمد بواسطة</th></tr></thead><tbody>
+          {(handoffsQuery.data ?? []).map(handoff => <tr key={handoff.id}><td>{shiftTypes.find(item => item.value === handoff.shiftType)?.label ?? handoff.shiftType}</td><td>{handoff.staffRole === "cashier" ? "كاشير" : "مختبر"}</td><td>{handoff.originalUserName ?? `حساب ${handoff.originalUserId}`}</td><td><strong>{handoff.substituteUserName ?? `حساب ${handoff.substituteUserId}`}</strong></td><td>{handoff.reason}</td><td>{handoff.approvedByName ?? `حساب ${handoff.approvedBy}`}</td></tr>)}
+        </tbody></table>
+        {!handoffsQuery.isLoading && (handoffsQuery.data ?? []).length === 0 && <div className="empty-state"><ArrowLeftRight size={20} /><strong>لا توجد تسليمات مسجلة اليوم</strong></div>}
+      </div>
     </section>
   );
 }
