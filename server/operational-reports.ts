@@ -31,6 +31,13 @@ export type ReportInvoiceRow = {
 
 export type PaymentBreakdownRow = { method: string; count: number; total: number };
 export type NetCollectionBreakdownRow = { service: "معاينة" | "مختبر"; method: string; total: number };
+export type ServicePaymentSummaryRow = {
+  service: "معاينة" | "مختبر";
+  cashTotal: number;
+  bankTotal: number;
+  total: number;
+  bankBreakdown: Array<{ bank: string; count: number; total: number }>;
+};
 export type ReportMetadata = {
   shiftOwnerName?: string | null;
   shiftLabName?: string | null;
@@ -58,6 +65,7 @@ export type OperationalReport = ReportWindow & {
   consultationTotal: number;
   testsTotal: number;
   paymentBreakdown: PaymentBreakdownRow[];
+  servicePaymentSummary: ServicePaymentSummaryRow[];
 };
 
 export class InvalidReportRequestError extends Error {
@@ -218,6 +226,7 @@ export function buildOperationalReport(
   }
 
   const netMap = new Map<string, NetCollectionBreakdownRow>();
+  const serviceMap = new Map<"معاينة" | "مختبر", ServicePaymentSummaryRow>();
   const addNet = (row: ReportInvoiceRow, sign: number) => {
     const consultation = Math.min(row.total, consultationFeeOf(row));
     const method = row.paymentMethod === "cash" ? "نقدي"
@@ -229,6 +238,23 @@ export function buildOperationalReport(
       const current = netMap.get(key) ?? { service, method, total: 0 };
       current.total += sign * amount;
       netMap.set(key, current);
+
+      const serviceSummary = serviceMap.get(service) ?? { service, cashTotal: 0, bankTotal: 0, total: 0, bankBreakdown: [] };
+      serviceSummary.total += sign * amount;
+      if (row.paymentMethod === "bank") {
+        serviceSummary.bankTotal += sign * amount;
+        const bank = row.paymentBank?.trim() || "غير محدد";
+        const bankRow = serviceSummary.bankBreakdown.find(item => item.bank === bank);
+        if (bankRow) {
+          bankRow.count += sign;
+          bankRow.total += sign * amount;
+        } else {
+          serviceSummary.bankBreakdown.push({ bank, count: sign, total: sign * amount });
+        }
+      } else if (row.paymentMethod === "cash") {
+        serviceSummary.cashTotal += sign * amount;
+      }
+      serviceMap.set(service, serviceSummary);
     }
   };
   collectedInvoices.forEach(row => addNet(row, 1));
@@ -254,6 +280,9 @@ export function buildOperationalReport(
     consultationTotal,
     testsTotal: Math.max(0, issuedTotal - consultationTotal),
     paymentBreakdown: [...paymentMap.values()].sort((a, b) => b.total - a.total),
+    servicePaymentSummary: [...serviceMap.values()]
+      .map(row => ({ ...row, bankBreakdown: row.bankBreakdown.filter(bank => bank.total !== 0).sort((a, b) => b.total - a.total) }))
+      .filter(row => row.total !== 0 || row.cashTotal !== 0 || row.bankTotal !== 0),
   };
 }
 

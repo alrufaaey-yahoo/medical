@@ -47,6 +47,7 @@ type ReportView = {
   collectedInvoices: ReportRow[];
   paymentBreakdown: Array<{ method: string; count: number; total: number }>;
   netCollectionBreakdown: Array<{ service: string; method: string; total: number }>;
+  servicePaymentSummary?: Array<{ service: string; cashTotal: number; bankTotal: number; total: number; bankBreakdown: Array<{ bank: string; count: number; total: number }> }>;
 };
 
 const PERIOD_LABEL: Record<ReportPeriod, string> = { daily: "اليوم", weekly: "هذا الأسبوع", monthly: "هذا الشهر" };
@@ -101,6 +102,7 @@ function buildDemoReport(patients: Patient[], range: ReportPeriod, catalog: LabT
     collectedInvoices: collected.map(toRow),
     paymentBreakdown: [{ method: "نقدي", count: collected.length, total: collected.reduce((sum, patient) => sum + getInvoiceTotal(patient, catalog, prices), 0) }],
     netCollectionBreakdown: [],
+    servicePaymentSummary: [],
   };
 }
 
@@ -113,6 +115,29 @@ function SummaryCards({ report }: { report: ReportView }) {
       <div><span>المعاينات</span><strong>{formatCurrency(report.consultationTotal)}</strong><small>{report.consultationGeneralCount} عمومي · {report.consultationSpecialistCount} اختصاصي</small></div>
       <div><span>إجمالي الفحوصات</span><strong>{formatCurrency(report.testsTotal)}</strong><small>بعد استبعاد المعاينات</small></div>
     </div>
+  );
+}
+
+function ServicePaymentSummary({ report }: { report: ReportView }) {
+  const rows = report.servicePaymentSummary ?? [];
+  const grandCash = rows.reduce((sum, row) => sum + row.cashTotal, 0);
+  const grandBank = rows.reduce((sum, row) => sum + row.bankTotal, 0);
+  const grandTotal = rows.reduce((sum, row) => sum + row.total, 0);
+  return (
+    <section className="panel service-payment-summary">
+      <div className="panel-header"><div><span className="eyebrow">التقرير المالي النهائي</span><h2>إجمالي كل قسم حسب الوردية</h2></div><WalletCards size={18} className="muted-icon" /></div>
+      <div className="service-summary-grid">
+        {(["معاينة", "مختبر"] as const).map(service => {
+          const row = rows.find(item => item.service === service) ?? { service, cashTotal: 0, bankTotal: 0, total: 0, bankBreakdown: [] };
+          return <div className="service-summary-card" key={service}>
+            <div className="service-summary-heading"><strong>{service === "معاينة" ? "العيادة / مقابلة الطبيب" : "المعمل"}</strong><b>{formatCurrency(row.total)}</b></div>
+            <div className="service-summary-values"><span>توتل الكاش <strong>{formatCurrency(row.cashTotal)}</strong></span><span>توتل البنك <strong>{formatCurrency(row.bankTotal)}</strong></span></div>
+            <div className="bank-breakdown"><small>تفصيل البنوك</small>{row.bankBreakdown.length ? row.bankBreakdown.map(bank => <span key={bank.bank}>{bank.bank}: <b>{formatCurrency(bank.total)}</b></span>) : <span>لا توجد تحصيلات بنكية</span>}</div>
+          </div>;
+        })}
+      </div>
+      <div className="service-summary-total"><span>توتل الكاش العام <strong>{formatCurrency(grandCash)}</strong></span><span>توتل البنك العام <strong>{formatCurrency(grandBank)}</strong></span><span>المجموع الكلي <strong>{formatCurrency(grandTotal)}</strong></span></div>
+    </section>
   );
 }
 
@@ -258,6 +283,7 @@ export function Reports({ patients, catalog, prices, hasSession, canDownloadPdf,
         report ? (
           <>
             <SummaryCards report={report} />
+            <ServicePaymentSummary report={report} />
             {report.paymentBreakdown.length > 0 && (
               <section className="panel payment-breakdown">
                 <div className="panel-header"><div><span className="eyebrow">طرق الدفع</span><h2>توزيع التحصيل</h2></div><WalletCards size={18} className="muted-icon" /></div>
@@ -280,6 +306,7 @@ export function Reports({ patients, catalog, prices, hasSession, canDownloadPdf,
         <>
           {!shiftQuery.data?.shift && <div className="panel empty-state"><CalendarDays size={22} /><strong>لا توجد وردية مسجلة بهذا التاريخ</strong><span>سيظهر التقرير بعد أول تسجيل مريض في الوردية.</span></div>}
           <SummaryCards report={shiftReport} />
+          <ServicePaymentSummary report={shiftReport} />
           <section className="panel">
             <div className="panel-header"><div><span className="eyebrow">فواتير الوردية · {shiftReport.issuedCount}</span><h2>حركة الوردية</h2></div><span className="catalog-count">وردية {SHIFT_LABELS[shiftType]}</span></div>
             <ReportTable rows={shiftReport.issuedInvoices} emptyText="لا توجد فواتير في هذه الوردية" />

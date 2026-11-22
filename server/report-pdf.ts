@@ -131,6 +131,15 @@ export async function renderOperationalReportPdfWithPdfKit(report: OperationalRe
     { label: "إجمالي الفحوصات", value: formatMoney(report.testsTotal) },
   ]);
 
+  const consultationSummary = report.servicePaymentSummary.find(row => row.service === "معاينة");
+  const labSummary = report.servicePaymentSummary.find(row => row.service === "مختبر");
+  doc.font("Amiri").fillColor("#1a7a75").fontSize(10)
+    .text(`العيادة / مقابلة الطبيب: كاش ${formatMoney(consultationSummary?.cashTotal ?? 0)} · بنك ${formatMoney(consultationSummary?.bankTotal ?? 0)} · المجموع ${formatMoney(consultationSummary?.total ?? 0)} · البنوك: ${consultationSummary?.bankBreakdown.map(bank => `${safeText(bank.bank, 24)} ${formatMoney(bank.total)}`).join(" · ") || "لا توجد"}`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
+  y += 14;
+  doc.fillColor("#536970").fontSize(8)
+    .text(`المعمل: كاش ${formatMoney(labSummary?.cashTotal ?? 0)} · بنك ${formatMoney(labSummary?.bankTotal ?? 0)} · المجموع ${formatMoney(labSummary?.total ?? 0)} · البنوك: ${labSummary?.bankBreakdown.map(bank => `${safeText(bank.bank, 24)} ${formatMoney(bank.total)}`).join(" · ") || "لا توجد"}`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
+  y += 17;
+
   doc.font("Amiri").fillColor("#536970").fontSize(8)
     .text(`صافي التحصيل حسب الخدمة وطريقة الدفع: ${report.netCollectionBreakdown.map(row => `${row.service} · ${row.method}: ${formatMoney(row.total)}`).join(" · ") || "لا توجد تحصيلات صافية"}`, LEFT, y, { width: CONTENT_WIDTH, align: "right" });
   y += 14;

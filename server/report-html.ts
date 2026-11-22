@@ -101,6 +101,7 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
     { label: "إجمالي الفحوصات", value: formatMoney(report.testsTotal) },
   ];
   const netBreakdown = report.netCollectionBreakdown.map(row => `${safeText(row.service, 20)} · ${safeText(row.method, 40)}: ${formatMoney(row.total)}`).join(" · ") || "لا توجد تحصيلات صافية";
+  const serviceSummary = report.servicePaymentSummary.map(row => `<div class="service-card"><strong>${row.service === "معاينة" ? "العيادة / مقابلة الطبيب" : "المعمل"}</strong><span>توتل الكاش: <b>${formatMoney(row.cashTotal)}</b></span><span>توتل البنك: <b>${formatMoney(row.bankTotal)}</b></span><span>المجموع: <b>${formatMoney(row.total)}</b></span><small>البنوك: ${row.bankBreakdown.length ? row.bankBreakdown.map(bank => `${safeText(bank.bank, 40)} ${formatMoney(bank.total)}`).join(" · ") : "لا توجد تحصيلات بنكية"}</small></div>`).join("");
   const issuedRows = tableRows(report.issuedInvoices, false);
   const collectedRows = tableRows(report.collectedInvoices, true);
   return `<!doctype html>
@@ -124,6 +125,9 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
   .card { background: #f1f7f6; border-radius: 5px; padding: 7px 6px; text-align: center; }
   .card span { display: block; color: #5a7178; font-size: 8pt; }
   .card strong { display: block; color: #123a42; font-size: 12pt; margin-top: 1px; }
+  .service-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: 5px 0 7px; }
+  .service-card { display: grid; gap: 2px; padding: 6px 8px; background: #f8fcfb; border: 1px solid #dcece8; border-radius: 5px; color: #52696f; font-size: 8pt; }
+  .service-card strong { color: #1a7a75; font-size: 9.5pt; }.service-card b { color: #123a42; }.service-card small { color: #71858a; font-size: 7.5pt; }
   .note { color: #5f7479; font-size: 8.5pt; margin: 2px 0; }
   h2 { font-size: 12pt; color: #1a7a75; margin: 12px 0 5px; }
   table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
@@ -147,6 +151,7 @@ export function buildOperationalReportHtml(report: OperationalReport, clinicName
     ${reportMeta ? `<p class="meta">${reportMeta}</p>` : ""}
   </div>
   <div class="cards">${cards.map(card => `<div class="card"><span>${card.label}</span><strong>${card.value}</strong></div>`).join("")}</div>
+  <div class="service-summary">${serviceSummary || `<div class="empty">لا توجد تحصيلات للقسمين.</div>`}</div>
   <p class="note">المعاينات: ${report.consultationCount} (عمومي ${report.consultationGeneralCount} · اختصاصي ${report.consultationSpecialistCount}). جميع المبالغ بالجنيه السوداني.</p>
   <p class="note">طرق التحصيل: ${payments}</p>
   <p class="note">صافي التحصيل حسب الخدمة وطريقة الدفع: ${netBreakdown}</p>

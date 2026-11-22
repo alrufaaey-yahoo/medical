@@ -242,6 +242,14 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .report-cards span { color: #8b9b9f; font-size: 10px; }
 .report-cards strong { color: #274a54; font-size: 18px; }
 .report-cards small { color: #a4b0b3; font-size: 9px; }
+.service-payment-summary { overflow: visible; }
+.service-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 20px 14px; }
+.service-summary-card { display: grid; gap: 10px; padding: 14px; background: #f8fcfb; border: 1px solid #deece9; border-radius: 11px; }
+.service-summary-heading, .service-summary-values, .service-summary-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.service-summary-heading strong { color: #244b55; font-size: 13px; }.service-summary-heading b { color: var(--teal); font-size: 16px; }
+.service-summary-values { color: #71858a; font-size: 10px; }.service-summary-values span { display: grid; gap: 3px; }.service-summary-values strong { color: #31525b; font-size: 12px; }
+.bank-breakdown { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px dashed #d9e8e5; color: #58737a; font-size: 10px; }.bank-breakdown small { width: 100%; color: #96a7aa; font-size: 9px; }.bank-breakdown span { padding: 4px 7px; background: #fff; border: 1px solid #e6efed; border-radius: 6px; }.bank-breakdown b { color: #31525b; }
+.service-summary-total { margin: 0 20px 18px; padding: 12px 14px; color: #71858a; background: #eef8f5; border: 1px solid #d6ebe5; border-radius: 9px; font-size: 10px; }.service-summary-total span { display: grid; gap: 4px; }.service-summary-total strong { color: #1f5d61; font-size: 14px; }
 .report-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 18px; }
 .report-meta-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin: -4px 0 12px; padding: 9px 14px; color: #31525b; background: #f3faf8; border: 1px solid #dcece8; border-radius: 9px; font-size: 11px; }
 .report-meta-strip span + span { padding-inline-start: 18px; border-inline-start: 1px solid #cfe1dc; }

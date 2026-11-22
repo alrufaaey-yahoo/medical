@@ -83,6 +83,10 @@ describe("operational report periods in Africa/Khartoum", () => {
       { service: "مختبر", method: "نقدي", total: 300 },
       { service: "معاينة", method: "نقدي", total: 100 },
     ]);
+    expect(report.servicePaymentSummary).toEqual([
+      { service: "معاينة", cashTotal: 100, bankTotal: 500, total: 600, bankBreakdown: [{ bank: "بنكك", count: 1, total: 500 }] },
+      { service: "مختبر", cashTotal: 300, bankTotal: 1500, total: 1800, bankBreakdown: [{ bank: "بنكك", count: 1, total: 1500 }] },
+    ]);
     expect(report.collectedInvoices.find(row => row.invoiceNumber === "BANK")).toMatchObject({ paymentBank: "بنكك", transactionNumber: "0427", employeeName: "سارة" });
   });
 });
